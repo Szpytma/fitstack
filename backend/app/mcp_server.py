@@ -15,7 +15,7 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from app import active_plan
+from app import active_plan, history
 from app.config import settings
 from app.planner import PlanInput, build_plan
 from app.providers.garmin import GarminProvider
@@ -180,6 +180,7 @@ def generate_race_plan(
     _require_auth()
     try:
         activities = _provider.activities(limit=60)
+        history.attach_laps(_provider, activities)
     except Exception:
         activities = []
 
@@ -218,6 +219,7 @@ def _plan_context(target_mode: str) -> tuple[list[dict[str, Any]], dict[str, Any
     """Recent runs, plus HR zones when targeting by heart rate."""
     try:
         activities = _provider.activities(limit=60)
+        history.attach_laps(_provider, activities)
     except Exception:
         activities = []
 
