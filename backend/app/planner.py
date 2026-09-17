@@ -66,6 +66,21 @@ _LONG_RUN_CAP: list[tuple[float, float]] = [
     (21.0975, 24.0),
     (42.195, 32.0),
 ]
+#: Time ceiling on the long run, in minutes. Distance alone is the wrong unit for
+#: this cap: 32 km is a three-hour run for one athlete and a four-and-a-half hour
+#: one for another, and past about three hours the cost climbs faster than the
+#: adaptation. Whichever cap binds first wins.
+_LONG_RUN_MAX_MIN: list[tuple[float, float]] = [
+    (5.0, 75.0),
+    (10.0, 90.0),
+    (21.0975, 135.0),
+    (42.195, 180.0),
+]
+
+#: No single run may take more than this share of its week. The share-of-week
+#: rule drives the long run in an ordinary block; this is the backstop for when
+#: the absolute ramp would otherwise let one run swallow the week.
+MAX_LONG_SHARE = 0.40
 
 
 def _interp(table: list[tuple[float, float]], km: float) -> float:
@@ -249,19 +264,47 @@ def volume_curve(
     return out[:total_weeks]
 
 
-def peak_volume(start_km: float, race_km: float) -> float:
+def peak_volume(start_km: float, race_km: float, build_weeks: int = 12) -> float:
+    """Where weekly volume tops out — the lift scales with how long the build is.
+
+    A flat 60% lift is right for a twelve-week build and far too timid for a
+    twenty-four week one: the same ramp given twice the time to do it in. On a
+    marathon block it is also what kept the long run short enough to make the
+    whole plan a half-marathon plan in disguise, because the long run is a share
+    of the week and the week never grew. Roughly 5% of the starting volume per
+    build week, clamped at 2.2x — and the distance ceiling still applies.
+    """
     ceiling = _interp(_VOLUME_CEILING, race_km)
-    # Never more than a 60% lift on where they actually are today.
-    return round(max(start_km * 1.1, min(start_km * 1.6, ceiling)), 1)
+    lift = max(1.1, min(1.0 + 0.05 * build_weeks, 2.2))
+    return round(max(start_km * 1.1, min(start_km * lift, ceiling)), 1)
 
 
-def long_run_km(weekly_km: float, race_km: float, phase: Phase) -> float:
-    """A long run is an absolute distance, not merely a share of a small week.
+def long_run_cap(race_km: float, long_mps: float | None = None) -> float:
+    """The longest single run this block will ever prescribe.
 
-    Note the cap is *not* tied to race distance: 5K runners should train well
-    beyond 5 km, while the marathon cap sits far below 42 km by design.
+    Distance cap and time cap, whichever binds first. Without a pace the time cap
+    cannot be applied and the distance one stands alone, which is the old
+    behaviour and why `long_mps` is optional.
+
+    Note the distance cap is *not* tied to race distance: 5K runners should train
+    well beyond 5 km, while the marathon cap sits far below 42 km by design.
     """
     cap = _interp(_LONG_RUN_CAP, race_km)
+    if long_mps and long_mps > 0:
+        cap = min(cap, long_mps * _interp(_LONG_RUN_MAX_MIN, race_km) * 60.0 / 1000.0)
+    return round(cap, 1)
+
+
+def long_run_km(
+    weekly_km: float, race_km: float, phase: Phase, long_mps: float | None = None
+) -> float:
+    """The share-of-week rule: what this week's volume alone implies.
+
+    This is the floor the absolute ramp in `long_run_curve` builds on, and it is
+    the whole rule during the taper, where the long run should shrink with the
+    week rather than keep climbing.
+    """
+    cap = long_run_cap(race_km, long_mps)
     share = 0.30 if phase in ("base", "build") else 0.33
     if phase in ("taper", "race"):
         share = 0.25
@@ -269,6 +312,47 @@ def long_run_km(weekly_km: float, race_km: float, phase: Phase) -> float:
     # but never let it swallow the week: 35% is the ceiling on the floor.
     floor = min(6.0 if race_km <= 10 else 8.0, cap, weekly_km * 0.35)
     return round(min(max(weekly_km * share, floor), cap), 1)
+
+
+def long_run_curve(
+    curve: list[tuple[float, bool]],
+    race_km: float,
+    total_weeks: int,
+    taper: int,
+    long_mps: float | None = None,
+) -> list[float]:
+    """Week-by-week long run — an absolute progression, not just a share.
+
+    The share rule on its own bounds the long run by the *starting* volume: at
+    30% of a week that tops out at 48 km, a marathon block peaks at a 16 km long
+    run, which prepares nobody for 42 km. So the long run gets a ramp of its own,
+    from what the first week implies up to `long_run_cap`, with the share rule
+    kept as a floor and `MAX_LONG_SHARE` as the ceiling on any single run.
+
+    Down weeks pull the long run back with the rest of the week, and the taper is
+    left entirely to the share rule — a long run that kept climbing into race
+    week would defeat the taper.
+
+    Pure function of the volume curve, so a rolling plan replays identically.
+    """
+    cap = long_run_cap(race_km, long_mps)
+    build_len = max(1, total_weeks - taper)
+    first = long_run_km(curve[0][0], race_km, "base", long_mps) if curve else 0.0
+
+    out: list[float] = []
+    for i, (vol, down) in enumerate(curve):
+        phase = phase_for(i, total_weeks, taper)
+        share_km = long_run_km(vol, race_km, phase, long_mps)
+        if phase in ("taper", "race"):
+            out.append(share_km)
+            continue
+        t = i / max(1, build_len - 1)
+        target = first + (cap - first) * t
+        if down:
+            target *= 0.8
+        km = min(max(share_km, target), cap, vol * MAX_LONG_SHARE)
+        out.append(round(km, 1))
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -740,6 +824,16 @@ def build_plan(
             "No recent volume found — assumed a modest starting week. Set your current "
             "weekly km for a plan that fits where you actually are."
         )
+    # A stated volume is taken at face value, but it is worth saying out loud when
+    # it is far ahead of what the athlete has actually been running: the plan then
+    # opens with a jump no ramp inside it can undo.
+    if stated and observed is not None and stated > observed * 1.5:
+        warnings.append(
+            f"You entered {stated:g} km/week but recent activities show about "
+            f"{observed:g} km/week. The plan is built on {stated:g} km, so week 1 asks "
+            f"for roughly {stated / max(observed, 0.1):.0f}x your current volume — "
+            "lower it if that is not deliberate."
+        )
 
     # Sanity-check the goal against observed fitness.
     if inp.goal_time_s and activities:
@@ -778,7 +872,7 @@ def build_plan(
 
     # --- volume ------------------------------------------------------------
     taper = taper_weeks_for(inp.race_km)
-    peak = peak_volume(start_km, inp.race_km)
+    peak = peak_volume(start_km, inp.race_km, total_weeks - taper)
     curve = volume_curve(total_weeks, start_km, peak, taper)
     if inp.week_scale:
         curve = [
@@ -793,6 +887,12 @@ def build_plan(
     long_p = pace_range(threshold, "long")
     rec_p = pace_range(threshold, "recovery")
 
+    # The long run progresses on its own terms; see `long_run_curve`. Built from
+    # the already-scaled curve so an adaptation hold pulls it back too.
+    long_mid = (long_p[0] + long_p[1]) / 2.0
+    lr_cap = long_run_cap(inp.race_km, long_mid)
+    lr_curve = long_run_curve(curve, inp.race_km, total_weeks, taper, long_mid)
+
     # Race week ends on race day; walk backwards from there.
     race_week_start = inp.race_date - timedelta(days=inp.race_date.weekday())
     first_week_start = race_week_start - timedelta(weeks=total_weeks - 1)
@@ -803,7 +903,7 @@ def build_plan(
         wk_start = first_week_start + timedelta(weeks=i)
         sessions: list[dict[str, Any]] = []
 
-        lr_km = long_run_km(vol, inp.race_km, phase)
+        lr_km = lr_curve[i]
         q_title, q_steps, q_dur, q_km, q_note, q_pace_label = quality_session(
             phase, threshold, inp.race_km, vol
         )
@@ -819,7 +919,7 @@ def build_plan(
         if filler_days and per_filler > lr_km * 0.9:
             spill = (per_filler - lr_km * 0.9) * len(filler_days)
             per_filler = round(lr_km * 0.9, 1)
-            lr_km = round(min(lr_km + spill, _interp(_LONG_RUN_CAP, inp.race_km)), 1)
+            lr_km = round(min(lr_km + spill, lr_cap), 1)
 
         for d in run_days:
             day = wk_start + timedelta(days=d)
@@ -930,11 +1030,23 @@ def build_plan(
         default=0.0,
     )
     if inp.race_km >= 10 and longest < inp.race_km * 0.65:
-        warnings.append(
-            f"Longest run peaks at {longest:g} km for a {inp.race_km:g} km race. "
-            "Starting volume is the limit here — more weeks, or more running now, "
-            "would be needed to prepare properly for the distance."
-        )
+        if longest >= lr_cap * 0.95:
+            # Time on feet, not volume, is what stopped it — and the answer to
+            # that is a faster long-run pace, not a longer long run. Saying "run
+            # more" here would send them out for three and a half hours.
+            mins = _interp(_LONG_RUN_MAX_MIN, inp.race_km)
+            warnings.append(
+                f"Longest run peaks at {longest:g} km for a {inp.race_km:g} km race, "
+                f"which is the {mins:g} minutes this plan will ask you to spend on "
+                "your feet. At your current long-run pace that is as far as three "
+                "hours goes; the distance rises as the pace does."
+            )
+        else:
+            warnings.append(
+                f"Longest run peaks at {longest:g} km for a {inp.race_km:g} km race. "
+                "Starting volume is the limit here — more weeks, or more running now, "
+                "would be needed to prepare properly for the distance."
+            )
 
     if inp.race_km >= 42 and total_weeks < 12:
         warnings.append(
