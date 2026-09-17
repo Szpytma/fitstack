@@ -32,7 +32,7 @@ from typing import Any
 from app import adapt
 from app.base_plan import BaseInput, build_base_plan
 from app.config import settings
-from app.planner import PlanInput, build_plan
+from app.planner import PlanInput, block_start, block_weeks, build_plan
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +215,67 @@ def rebuild(
     return build_plan(inp, activities or [], hr_zones)
 
 
+def lead_in_weeks(plan: ActivePlan) -> int:
+    """Weeks between the plan starting and the race block opening.
+
+    Zero for any race inside the block cap — the usual case. Positive when the
+    race is further out than `build_plan` will lay out in one go, because the
+    block is anchored backwards from race week and therefore opens later than
+    today.
+    """
+    opens = block_start(plan.start_date, plan.race_date)
+    first = upcoming_week_start(plan.start_date)
+    return max(0, (opens - first).days // 7)
+
+
+def lead_in_view(
+    plan: ActivePlan,
+    activities: list[dict[str, Any]],
+    hr_zones: dict[str, Any] | None,
+    week_start: date,
+) -> dict[str, Any]:
+    """A lead-in week: aerobic base, before the race block opens.
+
+    The race block covers the final `MAX_BLOCK_WEEKS`; a race further out leaves
+    weeks in front of it that used to 400 with "no plan week starts on …". They
+    are not an error — they are exactly the weeks in which to build aerobic base,
+    which is what `base_plan` exists for. So the lead-in is a real base block:
+    zone 2, minutes in and pace out, anchored on the same start date so it
+    replays identically week to week.
+    """
+    weeks = lead_in_weeks(plan)
+    if weeks <= 0:
+        raise ValueError("this plan has no lead-in")
+
+    opens = block_start(plan.start_date, plan.race_date)
+    base = build_base_plan(
+        BaseInput(
+            weeks=weeks,
+            runs_per_week=plan.runs_per_week,
+            long_run_day=plan.long_run_day,
+            start_date=upcoming_week_start(plan.start_date),
+            plan_name=f"Base — lead-in to {plan.race_name or 'the race'}",
+        ),
+        activities,
+        hr_zones,
+    )
+    view = week_view(plan, base, week_start, activities)
+    # week_view reads the race from the plan it was handed, which here is the
+    # base block. The race is still the point of the lead-in, so say so.
+    view["race_name"] = plan.race_name
+    view["race_km"] = plan.race_km
+    view["race_date"] = plan.race_date.isoformat()
+    view["lead_in"] = True
+    view["race_block_opens"] = opens.isoformat()
+    view["warnings"] = [
+        f"Lead-in week {view['week_number']} of {weeks}. The {plan.race_km:g} km "
+        f"block opens on {opens.isoformat()}; until then this is aerobic base — "
+        "heart rate is the prescription and pace is whatever it produces.",
+        *view.get("warnings", []),
+    ]
+    return view
+
+
 def adapted_view(
     plan: ActivePlan,
     activities: list[dict[str, Any]],
@@ -238,6 +299,9 @@ def adapted_view(
         weeks = original.get("weeks") or []
         first = weeks[0]["start"] if weeks else "?"
         last = weeks[-1]["end"] if weeks else "?"
+        # Before the block opens is lead-in, not "outside the plan".
+        if plan.mode != "base" and weeks and week_start < date.fromisoformat(first):
+            return lead_in_view(plan, activities, hr_zones, week_start)
         raise ValueError(
             f"No plan week starts on {week_start.isoformat()} — this block runs "
             f"{first} to {last}. The race may already have passed."
@@ -387,4 +451,7 @@ def status(plan: ActivePlan, today: date | None = None) -> dict[str, Any]:
         "target_mode": plan.target_mode,
         "anchor_weekly_km": plan.anchor_weekly_km,
         "next_week_starts": upcoming_week_start(today).isoformat(),
+        "block_weeks": block_weeks(plan.start_date, plan.race_date),
+        "race_block_opens": block_start(plan.start_date, plan.race_date).isoformat(),
+        "lead_in_weeks": lead_in_weeks(plan) if plan.mode != "base" else 0,
     }
