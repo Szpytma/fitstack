@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import model_validator, BaseModel, Field
 
 
 class DailySummary(BaseModel):
@@ -149,11 +149,31 @@ Target = PaceTarget | HrTarget
 
 
 class WorkoutStep(BaseModel):
+    """One step of a workout: how it ends, and what to chase while it runs.
+
+    A step ends on time *or* on distance, never both — "10 x 1 km" and
+    "10 x 4:00" are different workouts and the watch needs to be told which.
+    """
+
     kind: Literal["warmup", "interval", "recovery", "cooldown", "repeat"]
     duration_s: float | None = None
+    distance_m: float | None = None
     iterations: int | None = None
     target: Target | None = None
     steps: list["WorkoutStep"] | None = None
+
+    @model_validator(mode="after")
+    def _one_end_condition(self) -> "WorkoutStep":
+        if self.kind == "repeat":
+            return self
+        if self.duration_s and self.distance_m:
+            raise ValueError(
+                "a step ends on time or on distance, not both — set duration_s "
+                "or distance_m"
+            )
+        if not self.duration_s and not self.distance_m:
+            raise ValueError("a step needs duration_s or distance_m")
+        return self
 
 
 class RunningWorkoutSpec(BaseModel):
