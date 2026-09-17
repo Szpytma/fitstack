@@ -176,7 +176,9 @@ export type Target = PaceTarget | HrTarget;
 
 export interface WorkoutStep {
   kind: WorkoutStepKind;
+  /** A step ends on time or on distance, never both. */
   duration_s?: number | null;
+  distance_m?: number | null;
   iterations?: number | null;
   target?: Target | null;
   steps?: WorkoutStep[] | null;
