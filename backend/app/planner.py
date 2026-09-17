@@ -314,6 +314,54 @@ def long_run_km(
     return round(min(max(weekly_km * share, floor), cap), 1)
 
 
+def longest_recent_run_km(
+    activities: list[dict[str, Any]], before: date, days: int = 30
+) -> float | None:
+    """The longest single run in the `days` before `before`, in km."""
+    best = 0.0
+    for a in _running(activities):
+        try:
+            day = date.fromisoformat(str(a.get("start_local") or "")[:10])
+        except ValueError:
+            continue
+        if 0 <= (before - day).days < days:
+            best = max(best, float(a["distance_m"]) / 1000.0)
+    return round(best, 1) or None
+
+
+def progression_ceilings(
+    lr_curve: list[float],
+    longest_recent: float | None,
+    step: float = 1.10,
+    hard_cap: float | None = None,
+) -> list[float]:
+    """The furthest each long run may go, given the ones behind it.
+
+    A cohort of 5200+ runners found materially higher overuse-injury risk when a
+    single run passed 110% of the longest run in the previous 30 days — whether or
+    not weekly volume moved. The block's own ramp is gentler than that after the
+    first few weeks, so this binds at the start, where the plan meets an athlete
+    who has not been running the distances it assumes.
+
+    Walks forward: each week may exceed the best of (what history shows, what the
+    plan has already asked for) by `step`. Returned as ceilings rather than
+    applied, because the week assembly has to respect them too — the spill rule
+    used to push the long run straight back past this guard.
+    """
+    fallback = hard_cap if hard_cap is not None else float("inf")
+    if not longest_recent:
+        return [fallback] * len(lr_curve)
+    out: list[float] = []
+    reached = longest_recent
+    for km in lr_curve:
+        allowed = round(reached * step, 1)
+        if hard_cap is not None:
+            allowed = min(allowed, hard_cap)
+        out.append(allowed)
+        reached = max(reached, min(km, allowed))
+    return out
+
+
 def long_run_curve(
     curve: list[tuple[float, bool]],
     race_km: float,
@@ -770,6 +818,27 @@ def _session(
     }
 
 
+#: The longest block `build_plan` will lay out. A race further away than this is
+#: not planned in full: the weeks before the block are lead-in, and belong to the
+#: aerobic base planner (see `active_plan.lead_in_view`).
+MAX_BLOCK_WEEKS = 24
+
+
+def block_weeks(start_date: date, race_date: date) -> int:
+    """How many weeks the race block itself covers."""
+    return max(4, min(MAX_BLOCK_WEEKS, (race_date - start_date).days // 7))
+
+
+def block_start(start_date: date, race_date: date) -> date:
+    """The Monday the race block opens on.
+
+    Weeks are anchored *backwards* from race week, so a block shorter than the
+    runway starts later than today — that gap is the lead-in, not an error.
+    """
+    race_week_start = race_date - timedelta(days=race_date.weekday())
+    return race_week_start - timedelta(weeks=block_weeks(start_date, race_date) - 1)
+
+
 def build_plan(
     inp: PlanInput,
     activities: list[dict[str, Any]] | None = None,
@@ -782,10 +851,13 @@ def build_plan(
     days_out = (inp.race_date - today).days
     if days_out < 7:
         raise ValueError("Race date must be at least a week away to build a plan.")
-    total_weeks = max(4, min(24, days_out // 7))
-    if days_out // 7 > 24:
+    total_weeks = block_weeks(today, inp.race_date)
+    if days_out // 7 > MAX_BLOCK_WEEKS:
+        opens = block_start(today, inp.race_date)
         warnings.append(
-            f"Race is {days_out // 7} weeks out — planned the final 24 weeks only."
+            f"Race is {days_out // 7} weeks out — this block is the final "
+            f"{MAX_BLOCK_WEEKS} weeks and opens on {opens.isoformat()}. The weeks "
+            "before it are lead-in: build aerobic base there."
         )
 
     # --- fitness basis -----------------------------------------------------
@@ -892,6 +964,20 @@ def build_plan(
     long_mid = (long_p[0] + long_p[1]) / 2.0
     lr_cap = long_run_cap(inp.race_km, long_mid)
     lr_curve = long_run_curve(curve, inp.race_km, total_weeks, taper, long_mid)
+    longest_recent = longest_recent_run_km(activities, today)
+    lr_ceilings = progression_ceilings(lr_curve, longest_recent, hard_cap=lr_cap)
+    clamped = [min(km, c) for km, c in zip(lr_curve, lr_ceilings)]
+    if clamped != lr_curve:
+        first_held = next(
+            (i for i, (a, b) in enumerate(zip(clamped, lr_curve)) if a < b), 0
+        )
+        warnings.append(
+            f"Your longest run in the last 30 days is {longest_recent:g} km, so the "
+            f"first long runs are held to about 10% above it (week {first_held + 1} "
+            f"asks {clamped[first_held]:g} km, not {lr_curve[first_held]:g} km). "
+            "The long run climbs from there."
+        )
+    lr_curve = clamped
 
     # Race week ends on race day; walk backwards from there.
     race_week_start = inp.race_date - timedelta(days=inp.race_date.weekday())
@@ -916,10 +1002,19 @@ def build_plan(
 
         # An easy day must never out-distance the long run — on low run-count
         # weeks the remainder would otherwise pile onto a single midweek run.
-        if filler_days and per_filler > lr_km * 0.9:
+        #
+        # Two things this must not do. It must not push the long run past the
+        # progression ceiling: that guard exists precisely for the weeks where the
+        # week's volume outruns what the athlete's longest run supports, which is
+        # exactly when this branch fires. And it must not run in the taper, where
+        # evenly sized runs are the point and a long run climbing back up would
+        # undo the week. Volume the sessions cannot carry is simply not run.
+        if phase in ("taper", "race"):
+            pass
+        elif filler_days and per_filler > lr_km * 0.9:
             spill = (per_filler - lr_km * 0.9) * len(filler_days)
             per_filler = round(lr_km * 0.9, 1)
-            lr_km = round(min(lr_km + spill, lr_cap), 1)
+            lr_km = round(min(lr_km + spill, lr_cap, lr_ceilings[i]), 1)
 
         for d in run_days:
             day = wk_start + timedelta(days=d)
