@@ -166,6 +166,10 @@ class PlanWeekView(BaseModel):
     # The adaptation decision behind this week, and what it would have been.
     decision: PlanDecision | None = None
     original_planned_km: float | None = None
+    # True when this week comes before the race block opens — aerobic base, not
+    # race work. See `active_plan.lead_in_view`.
+    lead_in: bool = False
+    race_block_opens: str | None = None
     week: PlanWeek
 
 
@@ -183,6 +187,9 @@ class PlanStatus(BaseModel):
     target_mode: Literal["pace", "hr"]
     anchor_weekly_km: float
     next_week_starts: str
+    block_weeks: int | None = None
+    race_block_opens: str | None = None
+    lead_in_weeks: int = 0
 
 
 class PlanApplySession(BaseModel):
