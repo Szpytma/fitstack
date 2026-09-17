@@ -6,7 +6,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app import active_plan
+from app import active_plan, history
 from app.deps import get_garmin
 from app.base_plan import BaseInput, build_base_plan
 from app.planner import PlanInput, build_plan
@@ -85,6 +85,10 @@ def _plan_context(
             activities = provider.activities(limit=60)
         except Exception as exc:  # pragma: no cover - upstream flakiness
             log.warning("plan: could not read activities (%s); continuing without", exc)
+        else:
+            # Laps for the recent long-enough runs, so a structured session is
+            # read from its reps rather than its average. See `laps.py`.
+            history.attach_laps(provider, activities)
 
     # Always read zones, not just in HR mode: max HR is what makes the efficiency
     # factor comparable, and adaptation needs it whatever the targets are.
