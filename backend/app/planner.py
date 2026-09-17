@@ -631,6 +631,67 @@ def _steps_steady(duration_s: int, lo: float, hi: float) -> list[dict[str, Any]]
     ]
 
 
+#: The most of a long run that is run at race pace, and the longest that block
+#: may last. A marathon-pace section is the specific adaptation of the block —
+#: goal pace on legs that are already tired — but past about 50 minutes of it the
+#: session stops being a long run and becomes a race you did not enter.
+MP_SHARE = 0.35
+MP_MAX_S = 3000
+
+
+def long_run_session(
+    lr_km: float,
+    long_p: tuple[float, float],
+    race_v: float,
+    phase: Phase,
+    race_km: float,
+) -> tuple[str, list[dict[str, Any]], int, str]:
+    """→ (title, steps, duration_s, note) for one long run.
+
+    Easy throughout, except in the peak phase of a half or a marathon, where the
+    back end is run at race pace. Running goal pace fresh, in its own session,
+    trains something else: the thing that decides a marathon is whether that pace
+    still holds at 30 km, and the only way to rehearse it is inside the long run.
+
+    The fast section sits at the *end*, after an easy lead-in, and is preceded by
+    no recovery — the fatigue is the point.
+    """
+    easy_mid = (long_p[0] + long_p[1]) / 2.0
+    race_target = (race_v * 0.985, race_v * 1.015)
+
+    mp_km = 0.0
+    if phase == "peak" and race_km >= 21 and lr_km >= 14:
+        mp_km = round(min(lr_km * MP_SHARE, race_v * MP_MAX_S / 1000.0), 1)
+
+    if mp_km <= 0:
+        dur = int(lr_km / easy_mid * 1000)
+        return (
+            f"Long run {lr_km:g} km",
+            _steps_steady(dur, *long_p),
+            dur,
+            "Time on feet. Start slower than feels right.",
+        )
+
+    easy_km = lr_km - mp_km
+    lead_km = round(easy_km * 0.85, 2)
+    tail_km = round(easy_km - lead_km, 2)
+    lead_s = int(lead_km / easy_mid * 1000)
+    mp_s = int(mp_km / race_v * 1000)
+    tail_s = int(tail_km / easy_mid * 1000) if tail_km > 0.2 else 0
+
+    steps = _steps_steady(lead_s, *long_p)
+    steps += _steps_steady(mp_s, *race_target)
+    if tail_s:
+        steps += _steps_steady(tail_s, *long_p)
+    return (
+        f"Long run {lr_km:g} km, {mp_km:g} km at race pace",
+        steps,
+        lead_s + mp_s + tail_s,
+        f"Easy for {lead_km:g} km, then {mp_km:g} km at goal pace without a break. "
+        "Goal pace on tired legs is the session — do not start the fast part fresh.",
+    )
+
+
 def _steps_intervals(
     reps: int,
     work_s: int,
@@ -976,6 +1037,7 @@ def build_plan(
     easy_p = pace_range(threshold, "easy")
     long_p = pace_range(threshold, "long")
     rec_p = pace_range(threshold, "recovery")
+    race_v = threshold * race_speed_factor(inp.race_km)
 
     # The long run progresses on its own terms; see `long_run_curve`. Built from
     # the already-scaled curve so an adaptation hold pulls it back too.
@@ -1058,17 +1120,19 @@ def build_plan(
                 continue
 
             if d == long_day:
-                dur = int(lr_km / ((long_p[0] + long_p[1]) / 2) * 1000)
+                lr_title, lr_steps, lr_dur, lr_note = long_run_session(
+                    lr_km, long_p, race_v, phase, inp.race_km
+                )
                 sessions.append(
                     _session(
                         day,
                         "long",
-                        f"Long run {lr_km:g} km",
+                        lr_title,
                         lr_km,
-                        dur,
-                        _steps_steady(dur, *long_p),
+                        lr_dur,
+                        lr_steps,
                         pace_label(threshold, "long"),
-                        "Time on feet. Start slower than feels right.",
+                        lr_note,
                     )
                 )
             elif d == q_day:
