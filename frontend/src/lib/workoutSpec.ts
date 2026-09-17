@@ -30,7 +30,6 @@ const WRITABLE_KINDS: WorkoutStepKind[] = [
 
 function describeEnd(c: string | null | undefined): string {
   if (c === "lap.button") return "a lap-button step";
-  if (c === "distance") return "a distance-based step";
   if (c === "calories") return "a calorie-based step";
   return `an unsupported end condition (${c ?? "none"})`;
 }
@@ -50,14 +49,17 @@ function convertStep(s: WorkoutDetailStep, blockers: Set<string>): WorkoutStep |
     return null;
   }
 
-  // Only time-based steps survive the round trip — the spec has no way to say
-  // "until I press lap" or "for 400 m".
-  if (s.end_condition !== "time") {
+  // Time and distance both survive the round trip. What does not is anything
+  // whose end the spec cannot state — "until I press lap", or a calorie count.
+  if (s.end_condition !== "time" && s.end_condition !== "distance") {
     blockers.add(`it uses ${describeEnd(s.end_condition)}`);
     return null;
   }
 
-  const step: WorkoutStep = { kind, duration_s: s.end_value ?? 0 };
+  const step: WorkoutStep =
+    s.end_condition === "distance"
+      ? { kind, distance_m: s.end_value ?? 0 }
+      : { kind, duration_s: s.end_value ?? 0 };
 
   const t = s.target_type;
   if (t && t !== "no.target") {
@@ -127,7 +129,11 @@ export function mapLeaves(
   });
 }
 
-/** Total seconds a spec prescribes, repeats expanded. */
+/** Total seconds a spec prescribes, repeats expanded.
+ *
+ *  Distance steps contribute nothing: how long 1 km takes is a fact about the
+ *  athlete on the day, not about the workout, and Garmin estimates it itself.
+ */
 export function specDuration(steps: WorkoutStep[]): number {
   return steps.reduce((total, s) => {
     if (s.kind === "repeat") {

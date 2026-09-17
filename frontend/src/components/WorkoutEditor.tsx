@@ -113,18 +113,34 @@ export function WorkoutEditor({ workoutId, detail, onClose }: Props) {
             <li key={path} className="flex flex-wrap items-center gap-2 text-xs">
               <span className="w-16 shrink-0 capitalize text-slate-400">{step.kind}</span>
 
-              <label className="flex items-center gap-1">
-                <span className="text-slate-600">sec</span>
-                <input
-                  type="number"
-                  min={5}
-                  max={14400}
-                  value={Math.round(step.duration_s ?? 0)}
-                  onChange={(e) => patchLeaf(path, { duration_s: Number(e.target.value) })}
-                  className="w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 tabular-nums"
-                  aria-label={`${step.kind} duration in seconds`}
-                />
-              </label>
+              {step.distance_m != null ? (
+                <label className="flex items-center gap-1">
+                  <span className="text-slate-600">m</span>
+                  <input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={100}
+                    value={Math.round(step.distance_m)}
+                    onChange={(e) => patchLeaf(path, { distance_m: Number(e.target.value) })}
+                    className="w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 tabular-nums"
+                    aria-label={`${step.kind} distance in metres`}
+                  />
+                </label>
+              ) : (
+                <label className="flex items-center gap-1">
+                  <span className="text-slate-600">sec</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={14400}
+                    value={Math.round(step.duration_s ?? 0)}
+                    onChange={(e) => patchLeaf(path, { duration_s: Number(e.target.value) })}
+                    className="w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 tabular-nums"
+                    aria-label={`${step.kind} duration in seconds`}
+                  />
+                </label>
+              )}
 
               {t?.type === "hr" && (
                 <span className="flex items-center gap-1">
