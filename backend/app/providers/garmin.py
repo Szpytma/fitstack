@@ -405,7 +405,11 @@ class GarminProvider(FitnessProvider):
         `update_running_workout` can reuse the exact same construction.
         """
         from garminconnect.workout import (
+            ConditionType,
+            ExecutableStep,
             RunningWorkout,
+            StepType,
+            TargetType,
             WorkoutSegment,
             create_warmup_step,
             create_interval_step,
@@ -413,6 +417,46 @@ class GarminProvider(FitnessProvider):
             create_cooldown_step,
             create_repeat_group,
         )
+
+        # (stepTypeId, key, displayOrder) exactly as the library's own helpers
+        # emit them — Garmin is order-sensitive about these dicts.
+        step_types = {
+            "warmup": (StepType.WARMUP, "warmup", 1),
+            "cooldown": (StepType.COOLDOWN, "cooldown", 2),
+            "interval": (StepType.INTERVAL, "interval", 3),
+            "recovery": (StepType.RECOVERY, "recovery", 4),
+        }
+
+        def distance_step(
+            kind: str, metres: float, order: int, target_type: dict[str, Any] | None
+        ) -> Any:
+            """A step that ends after a distance.
+
+            The library ships `create_distance_interval_step` and nothing for the
+            other kinds, so this builds them — same shape, different stepType.
+            """
+            type_id, key, display = step_types[kind]
+            return ExecutableStep(
+                stepOrder=order,
+                stepType={
+                    "stepTypeId": type_id,
+                    "stepTypeKey": key,
+                    "displayOrder": display,
+                },
+                endCondition={
+                    "conditionTypeId": ConditionType.DISTANCE,
+                    "conditionTypeKey": "distance",
+                    "displayOrder": 3,
+                    "displayable": True,
+                },
+                endConditionValue=float(metres),
+                targetType=target_type
+                or {
+                    "workoutTargetTypeId": TargetType.NO_TARGET,
+                    "workoutTargetTypeKey": "no.target",
+                    "displayOrder": 1,
+                },
+            )
 
         sport = {"sportTypeId": 1, "sportTypeKey": "running"}
 
@@ -457,19 +501,22 @@ class GarminProvider(FitnessProvider):
                 inner = [build_step(ss, i + 1) for i, ss in enumerate(s.get("steps", []))]
                 return create_repeat_group(int(s.get("iterations", 1)), inner, step_order=order)
             dur = float(s.get("duration_s") or 0)
+            metres = float(s.get("distance_m") or 0)
             tgt = build_target(s.get("target"))
             type_dict = tgt[0] if tgt else None
 
-            if kind == "warmup":
+            if kind not in step_types:
+                raise ValueError(f"Unknown step kind: {kind}")
+            if metres > 0:
+                step = distance_step(kind, metres, order, type_dict)
+            elif kind == "warmup":
                 step = create_warmup_step(dur, step_order=order, target_type=type_dict)
             elif kind == "interval":
                 step = create_interval_step(dur, step_order=order, target_type=type_dict)
             elif kind == "recovery":
                 step = create_recovery_step(dur, step_order=order, target_type=type_dict)
-            elif kind == "cooldown":
-                step = create_cooldown_step(dur, step_order=order, target_type=type_dict)
             else:
-                raise ValueError(f"Unknown step kind: {kind}")
+                step = create_cooldown_step(dur, step_order=order, target_type=type_dict)
 
             if tgt:
                 # Garmin wants the slower/lower bound first for both target kinds.

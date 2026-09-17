@@ -454,6 +454,9 @@ def steps_distance_km(steps: list[dict[str, Any]], default_mps: float) -> float:
             inner = steps_distance_km(s.get("steps") or [], default_mps) * 1000.0
             total_m += inner * int(s.get("iterations") or 1)
             continue
+        if s.get("distance_m"):
+            total_m += float(s["distance_m"])  # the step says how far outright
+            continue
         dur = float(s.get("duration_s") or 0)
         target = s.get("target") or {}
         if target.get("type") == "pace":
