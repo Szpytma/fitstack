@@ -142,3 +142,35 @@ export function specDuration(steps: WorkoutStep[]): number {
     return total + (s.duration_s ?? 0);
   }, 0);
 }
+
+/**
+ * A plan session's spec, in the shape `StepList` renders.
+ *
+ * The plan carries the spec it would upload; the preview component reads the
+ * shape Garmin hands back. They describe the same workout in two dialects, so
+ * this translates rather than fetching — a plan session has no `workout_id` to
+ * fetch with until it has been scheduled, which is exactly when you most want
+ * to see what it contains.
+ */
+export function detailStepsFromSpec(steps: WorkoutStep[]): WorkoutDetailStep[] {
+  return steps.map((s): WorkoutDetailStep => {
+    if (s.kind === "repeat") {
+      return {
+        kind: "repeat",
+        iterations: s.iterations ?? 1,
+        steps: detailStepsFromSpec(s.steps ?? []),
+      };
+    }
+    const onDistance = s.distance_m != null;
+    const t = s.target;
+    return {
+      kind: s.kind,
+      end_condition: onDistance ? "distance" : "time",
+      end_value: onDistance ? (s.distance_m ?? 0) : (s.duration_s ?? 0),
+      target_type:
+        t?.type === "pace" ? "pace.zone" : t?.type === "hr" ? "heart.rate.zone" : "no.target",
+      target_low: t?.type === "pace" ? t.low_mps : t?.type === "hr" ? t.low_bpm : null,
+      target_high: t?.type === "pace" ? t.high_mps : t?.type === "hr" ? t.high_bpm : null,
+    };
+  });
+}

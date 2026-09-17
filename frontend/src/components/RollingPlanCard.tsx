@@ -23,6 +23,8 @@ import type {
   PlanSession,
   RunningWorkoutSpec,
 } from "@/api/types";
+import { StepList } from "@/components/WorkoutPreview";
+import { detailStepsFromSpec } from "@/lib/workoutSpec";
 
 const PHASE_STYLE: Record<string, string> = {
   base: "bg-sky-500/15 text-sky-300 border-sky-500/30",
@@ -136,22 +138,55 @@ function Adjusted({
   );
 }
 
+/** One session, expandable into the steps it would upload.
+ *
+ *  Until now the structure was only visible after the workout reached Garmin,
+ *  which is the wrong way round: whether a session is one continuous block or
+ *  reps with recoveries is exactly what you want to know *before* scheduling it.
+ */
 function SessionRow({ s, mode }: { s: PlanSession; mode: string }) {
+  const [open, setOpen] = useState(false);
+  const steps = s.spec?.steps ?? [];
+  const expandable = steps.length > 0;
+
   return (
-    <div className="flex items-center gap-3 px-3 py-2">
-      <span
-        className={`w-1 h-4 rounded-full shrink-0 ${KIND_BAR[s.kind] ?? "bg-slate-700"}`}
-      />
-      <span className="text-xs text-slate-500 w-14 shrink-0">
-        {s.day.slice(0, 3)} {shortDate(s.date)}
-      </span>
-      <span className="text-sm text-slate-200 flex-1 truncate">{s.title}</span>
-      <span className="text-xs text-slate-400 shrink-0 tabular-nums">
-        {s.distance_km} km
-      </span>
-      <span className="text-xs text-slate-500 shrink-0 w-28 text-right truncate">
-        {(mode === "hr" ? s.hr_label : s.pace_label) ?? s.pace_label}
-      </span>
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-3">
+        <span
+          className={`w-1 h-4 rounded-full shrink-0 ${KIND_BAR[s.kind] ?? "bg-slate-700"}`}
+        />
+        <span className="text-xs text-slate-500 w-14 shrink-0">
+          {s.day.slice(0, 3)} {shortDate(s.date)}
+        </span>
+        {expandable ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="text-sm text-slate-200 flex-1 truncate text-left hover:text-white flex items-center gap-1.5"
+          >
+            <ChevronRight
+              size={13}
+              className={`shrink-0 text-slate-500 transition-transform ${open ? "rotate-90" : ""}`}
+            />
+            {s.title}
+          </button>
+        ) : (
+          <span className="text-sm text-slate-200 flex-1 truncate">{s.title}</span>
+        )}
+        <span className="text-xs text-slate-400 shrink-0 tabular-nums">
+          {s.distance_km} km
+        </span>
+        <span className="text-xs text-slate-500 shrink-0 w-28 text-right truncate">
+          {(mode === "hr" ? s.hr_label : s.pace_label) ?? s.pace_label}
+        </span>
+      </div>
+      {open && expandable && (
+        <div className="mt-2 ml-4 pl-3 border-l border-dashed border-slate-700">
+          <StepList steps={detailStepsFromSpec(steps)} />
+          {s.note && <p className="mt-2 text-xs text-slate-500">{s.note}</p>}
+        </div>
+      )}
     </div>
   );
 }
