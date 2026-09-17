@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Small utility class for form inputs to keep markup tidy. */
+.input {
+  @apply w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-slate-100 text-sm
+         focus:outline-none focus:ring-2 focus:ring-emerald-500/50;
+}
+
+/* Fix Leaflet default marker icons under Vite (assets not auto-resolved). */
+.leaflet-container {
+  background: #0f172a;
+}

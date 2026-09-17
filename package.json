@@ -1,0 +1,14 @@
+{
+  "name": "fitstack",
+  "private": true,
+  "version": "0.3.0",
+  "description": "One command to start FitStack backend + frontend together.",
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "cd backend && .venv\\Scripts\\python.exe run.py",
+    "dev:frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
