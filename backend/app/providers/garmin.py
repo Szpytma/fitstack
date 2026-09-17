@@ -154,6 +154,24 @@ class GarminProvider(FitnessProvider):
             "segments": segments,
         }
 
+    def activity_laps(self, activity_id: int | str) -> list[dict[str, Any]]:
+        """Just the laps — `activity_detail` also pulls the time series and map.
+
+        Plan building reads laps for several activities at once, so it wants the
+        cheap call, not the one that carries a polyline.
+        """
+        raw = self._login().get_activity_splits(str(int(activity_id))) or {}
+        return [
+            {
+                "lap": s.get("lapIndex"),
+                "distance_m": s.get("distance"),
+                "duration_s": s.get("duration"),
+                "avg_hr": s.get("averageHR"),
+                "avg_speed_mps": s.get("averageSpeed"),
+            }
+            for s in raw.get("lapDTOs") or raw.get("laps") or []
+        ]
+
     # ---------- READ: activity detail (map + charts) ----------
     def activity_detail(self, activity_id: int | str) -> dict[str, Any]:
         client = self._login()

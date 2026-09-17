@@ -39,6 +39,14 @@ class FitnessProvider(ABC):
     def workout_detail(self, workout_id: int | str) -> dict[str, Any]: ...
 
     @abstractmethod
+    def activity_laps(self, activity_id: int | str) -> list[dict[str, Any]]:
+        """Lap splits for one activity, cheaply — see `laps.py` for why.
+
+        Optional: a provider without lap data raises, and the callers fall back
+        to reading the activity as a steady run.
+        """
+        raise NotImplementedError
+
     def activity_detail(self, activity_id: int | str) -> dict[str, Any]:
         """Return per-activity time series (HR/pace/altitude), GPS polyline, splits, weather, HR zones."""
 

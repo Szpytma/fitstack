@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from app import laps
+
 log = logging.getLogger(__name__)
 
 # --- thresholds -------------------------------------------------------------
@@ -124,6 +126,11 @@ def efficiency_factor(activity: dict[str, Any], max_hr: int | None) -> float | N
     easy running is getting cheaper.
     """
     if "run" not in (activity.get("type") or "").lower():
+        return None
+    if laps.is_structured(activity.get("laps")):
+        # A session of reps and jog backs averages to a pace and a heart rate
+        # that belong to neither. Its average often lands inside the aerobic
+        # window, so the window alone will not keep it out.
         return None
     dist = activity.get("distance_m")
     hr = activity.get("avg_hr")
