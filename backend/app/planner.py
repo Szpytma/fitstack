@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Literal
 
+from app import laps
+
 # Riegel's endurance exponent: t2 = t1 * (d2/d1) ** 1.06
 RIEGEL_EXPONENT = 1.06
 
@@ -171,7 +173,20 @@ def threshold_from_activities(
     best: dict[str, Any] | None = None
     for a in runs:
         km = float(a["distance_m"]) / 1000.0
-        t10k = riegel(float(a["duration_s"]), km, 10.0)
+        seconds = float(a["duration_s"])
+        # A structured session is read from its reps. Projecting the whole
+        # activity — warmup, jog backs and all — turns the best threshold
+        # measurement of the week into a slow 10K and throws it away.
+        if laps.is_structured(a.get("laps")):
+            equivalent = laps.continuous_equivalent(a.get("laps"))
+            # No readable work set — a session too broken up to aggregate. Fall
+            # back to the whole activity rather than discarding the run: the
+            # average underreads, which costs a little, where dropping it can
+            # leave nothing to estimate from at all.
+            if equivalent is not None:
+                dist_m, seconds = equivalent
+                km = dist_m / 1000.0
+        t10k = riegel(seconds, km, 10.0)
         if best_t10k is None or t10k < best_t10k:
             best_t10k, best = t10k, a
 
