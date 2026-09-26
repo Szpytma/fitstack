@@ -149,9 +149,10 @@ Output shape matches `build_plan` deliberately, so the rolling-week machinery,
 adaptation and the Garmin push all work on it unchanged. Sessions are a single
 time-based step with an `HrTarget`, which is what the watch wants anyway.
 
-Why it exists: this account ran **1 of 26** runs with an average HR in zone 2 — 81%
-sat in zone 3. That is the grey-zone trap, and a race plan with threshold and VO2 work
-on top of it is how people get cooked.
+Why it exists: the mode was written for an account whose easy runs almost all
+landed in zone 3 rather than zone 2. That is the grey-zone trap, and a race plan
+with threshold and VO2 work stacked on top of it is how people get cooked. Check
+the zone split of recent runs before reaching for a race plan.
 
 ## Adaptation (`adapt.py`)
 
