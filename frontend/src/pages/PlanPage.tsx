@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   useApplyPlan,
+  useMcpPaths,
   usePlanPreview,
   usePlanStatus,
   useStartRollingPlan,
@@ -27,15 +28,31 @@ import { PlanTable } from "@/components/PlanTable";
 import { RollingPlanCard, StartRollingButton } from "@/components/RollingPlanCard";
 import { adjustedSession, hasAnyAdjust, NO_ADJUST, type PlanAdjust } from "@/lib/planAdjust";
 
-const DESKTOP_CONFIG = `{
-  "mcpServers": {
-    "fitstack": {
-      "command": "C:/Users/szpyt/source/repos/fitstack/backend/.venv/Scripts/python.exe",
-      "args": ["-m", "app.mcp_server"],
-      "cwd": "C:/Users/szpyt/source/repos/fitstack/backend"
-    }
-  }
-}`;
+/** Shown while the backend has not answered yet, and if it never does. The
+ *  shape is right even when the paths are not, so it is still copy-and-edit. */
+const PLACEHOLDER_PATHS = {
+  repo_root: "/absolute/path/to/fitstack",
+  backend_dir: "/absolute/path/to/fitstack/backend",
+  python: "/absolute/path/to/fitstack/backend/.venv/bin/python",
+};
+
+/** The same JSON serves Claude Desktop and a project `.mcp.json` — Claude Code
+ *  reads the identical block from the repo root. */
+function mcpConfig(paths: { backend_dir: string; python: string }): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        fitstack: {
+          command: paths.python,
+          args: ["-m", "app.mcp_server"],
+          cwd: paths.backend_dir,
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
 
 const TOOLS: { name: string; desc: string; write?: boolean }[] = [
   { name: "get_daily_summary", desc: "One day of steps / calories / HR" },
@@ -733,6 +750,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export function PlanPage() {
+  // Absolute paths differ per machine, so they come from the backend that is
+  // running rather than from anything checked in.
+  const { data: paths } = useMcpPaths();
+  const p = paths ?? PLACEHOLDER_PATHS;
+  const config = mcpConfig(p);
+
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
       <header>
@@ -787,12 +810,16 @@ export function PlanPage() {
           <Terminal className="w-4 h-4 text-emerald-400" /> Claude Code
         </h2>
         <p className="text-slate-400 text-sm">
-          A <code className="text-emerald-300">.mcp.json</code> file already lives
-          at the FitStack repo root. Any Claude Code session started in{" "}
-          <code className="text-slate-200">C:/Users/szpyt/source/repos/fitstack</code>{" "}
-          will pick it up. On first use Claude Code prompts to trust the server —
-          approve it and the tools show up under <code>/mcp</code>.
+          Copy <code className="text-emerald-300">.mcp.json.example</code> to{" "}
+          <code className="text-emerald-300">.mcp.json</code> in the repo root and
+          paste the block below into it. Any Claude Code session started in{" "}
+          <code className="text-slate-200">{p.repo_root}</code> then picks it up.
+          On first use Claude Code prompts to trust the server — approve it and
+          the tools show up under <code>/mcp</code>.
         </p>
+        <pre className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 overflow-x-auto">
+          {config}
+        </pre>
       </section>
 
       <section className="rounded-xl bg-slate-900 border border-slate-800 p-6 space-y-3">
@@ -804,15 +831,19 @@ export function PlanPage() {
           <code className="text-emerald-300">
             %APPDATA%\Claude\claude_desktop_config.json
           </code>{" "}
-          (create it if missing) and paste:
+          on Windows, or{" "}
+          <code className="text-emerald-300">
+            ~/Library/Application Support/Claude/claude_desktop_config.json
+          </code>{" "}
+          on macOS (create it if missing), and paste the same block:
         </p>
         <pre className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 overflow-x-auto">
-          {DESKTOP_CONFIG}
+          {config}
         </pre>
         <p className="text-slate-400 text-sm">
           Fully quit and restart Claude Desktop. Look for the tool/hammer icon in
-          the input bar — you should see <code>fitstack</code> listed with 15
-          tools.
+          the input bar — you should see <code>fitstack</code> listed with{" "}
+          {TOOLS.length} tools.
         </p>
       </section>
 

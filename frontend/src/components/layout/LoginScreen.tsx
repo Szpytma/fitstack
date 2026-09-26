@@ -70,7 +70,7 @@ export function LoginScreen({ configured }: Props) {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder={configured ? "" : "e.g. pawel"}
+              placeholder={configured ? "" : "e.g. runner"}
               className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-100"
             />
           </label>
