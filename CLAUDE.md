@@ -208,6 +208,40 @@ come from `provider.heart_rate_zones()` (the athlete's configured Garmin max HR 
 zone floors); if Garmin has no zone setup it falls back to the median of the three
 highest run HRs, and says so in `warnings`.
 
+## Tests
+
+```powershell
+cd backend
+.venv\Scripts\python.exe -m pytest        # ~0.2s, no network, no Garmin
+```
+
+`backend/tests/` covers the planning core — the pure, deterministic half of the
+app, which is both the easiest to test and the part where a silent regression
+costs a training block. Fixtures are literal activity dicts (`tests/conftest.py`),
+so nothing needs an account.
+
+What is pinned, and why each one:
+
+- **A golden 24-week marathon block** — phase, `planned_km` and long run for
+  every week. Not sacred numbers; a change to `volume_curve` or `long_run_curve`
+  simply has to say out loud which weeks it moved.
+- **Taper never rises**, in volume or long run. The same failure `_hold_scale`
+  guards on the adaptation side.
+- **Long-run progression survives the spill rule.** Use a history whose longest
+  recent run is well under what the curve wants (`runs=6, long_share=8/40`),
+  or the clamp never binds and the test proves nothing.
+- **Replay identity**, and that a *stateless* rebuild loses the taper — the
+  failure `active_plan.py`'s pins exist to prevent, stated as a test.
+- **One bad week changes nothing**; two consecutive ones hold. Plus a hold into
+  a down week never lifting it.
+- **EF rejects time trials and interval sessions**, because both post numbers
+  that say nothing about easy running.
+- **`zone2_band` refuses to guess** — base mode will not build without
+  configured zones.
+
+Measure the long run by `kind == "long"`, never by the longest session: an early
+threshold workout with warmup and cooldown can out-distance it.
+
 ## Non-obvious things
 
 - **Garmin weather temp** — comes back in the user's account unit. Heuristic in
