@@ -16,3 +16,13 @@ frontend/.vite/
 *.db
 *.sqlite*
 .DS_Store
+
+# Personal, machine-specific Claude Code settings.
+.claude/settings.local.json
+
+# MCP config holds an absolute path to this machine's venv — copy
+# .mcp.json.example and fill in your own.
+.mcp.json
+
+# TypeScript incremental build cache.
+*.tsbuildinfo

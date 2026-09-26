@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fitstack": {
+      "command": "/absolute/path/to/fitstack/backend/.venv/bin/python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/absolute/path/to/fitstack/backend"
+    }
+  }
+}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +47,27 @@ def root() -> dict[str, str | list[str]]:
 @app.get("/healthz", tags=["meta"])
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# backend/app/main.py -> app -> backend -> repo root
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _BACKEND_DIR.parent
+
+
+@app.get("/meta/mcp", tags=["meta"], dependencies=[AuthDep])
+def mcp_paths() -> dict[str, str]:
+    """Where this install actually lives, so the UI can print a config that works.
+
+    The MCP client needs an absolute path to the interpreter that has FitStack's
+    dependencies — which is this process's own (`sys.executable`), because the
+    backend is launched from the venv. Read at runtime rather than written into
+    the frontend: a checked-in path is one person's machine and nobody else's.
+    """
+    return {
+        "repo_root": _REPO_ROOT.as_posix(),
+        "backend_dir": _BACKEND_DIR.as_posix(),
+        "python": Path(sys.executable).as_posix(),
+    }
 
 
 # /auth is deliberately open — it is how you get a session in the first place.
