@@ -23,6 +23,10 @@ from app import laps
 # Riegel's endurance exponent: t2 = t1 * (d2/d1) ** 1.06
 RIEGEL_EXPONENT = 1.06
 
+#: Weeks a marathon block wants. Named because the warning text quotes it — the
+#: number and the threshold that tests it must not drift apart again.
+MARATHON_RUNWAY_WEEKS = 16
+
 DAYS = [
     "Monday",
     "Tuesday",
@@ -1376,9 +1380,15 @@ def build_plan(
                 "would be needed to prepare properly for the distance."
             )
 
-    if inp.race_km >= 42 and total_weeks < 12:
+    # 16 is the runway the message names, so that is the threshold to test
+    # against: firing below 12 left every 12-to-15-week marathon block silent,
+    # which is exactly the range where the warning is worth reading.
+    if inp.race_km >= 42 and total_weeks < MARATHON_RUNWAY_WEEKS:
+        short_by = MARATHON_RUNWAY_WEEKS - total_weeks
         warnings.append(
-            f"{total_weeks} weeks is short for a marathon — 16+ is the usual runway."
+            f"{total_weeks} weeks is short for a marathon — {MARATHON_RUNWAY_WEEKS}+ "
+            f"is the usual runway, so this block is {short_by} "
+            f"{'week' if short_by == 1 else 'weeks'} under it."
         )
     if inp.race_km >= 21 and total_weeks < 8:
         warnings.append(f"{total_weeks} weeks is a tight build for {inp.race_km:g} km.")
