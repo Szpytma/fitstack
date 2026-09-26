@@ -74,7 +74,16 @@ export const authApi = {
     http.delete<{ connected: boolean }>("/auth/garmin").then((r) => r.data),
 };
 
+/** Absolute paths of the running backend, used to print MCP configs that
+ *  actually work on this machine. */
+export interface McpPaths {
+  repo_root: string;
+  backend_dir: string;
+  python: string;
+}
+
 export const api = {
+  mcpPaths: () => http.get<McpPaths>("/meta/mcp").then((r) => r.data),
   today: () => http.get<DailySummary>("/health/today").then((r) => r.data),
   summary: (day: string) =>
     http.get<DailySummary>(`/health/summary/${day}`).then((r) => r.data),
