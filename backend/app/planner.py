@@ -263,7 +263,9 @@ def _weekly_buckets(
     return buckets
 
 
-def observed_weekly_km(activities: list[dict[str, Any]], weeks: int = 4) -> float | None:
+def observed_weekly_km(
+    activities: list[dict[str, Any]], weeks: int = 4, today: date | None = None
+) -> float | None:
     """Mean weekly running volume over the last `weeks` weeks, zeros included.
 
     Kept because it answers a real question — "how much have they run lately" —
@@ -274,7 +276,10 @@ def observed_weekly_km(activities: list[dict[str, Any]], weeks: int = 4) -> floa
     runs = _running(activities)
     if not runs:
         return None
-    cutoff = date.today() - timedelta(weeks=weeks)
+    # Takes `today` rather than reading the clock, because its caller does: a
+    # rolling plan replays against its pinned start date, and a floor measured
+    # on a different calendar than the buckets above it is not reproducible.
+    cutoff = (today or date.today()) - timedelta(weeks=weeks)
     total = 0.0
     seen = False
     for a in runs:
@@ -313,7 +318,7 @@ def weekly_volume(
     today = today or date.today()
     buckets = _weekly_buckets(activities, today, weeks)
     active = sorted(v for v in buckets.values() if v > 0)
-    recent = observed_weekly_km(activities)
+    recent = observed_weekly_km(activities, today=today)
     longest = longest_recent_run_km(activities, today)
 
     if not active:
