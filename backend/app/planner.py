@@ -140,6 +140,9 @@ class Basis:
     reference: str | None = None
     reference_activity_id: int | None = None
     weekly_km_observed: float | None = None
+    #: What the plan actually starts from, and the numbers it was read from.
+    weekly_km_start: float | None = None
+    volume_basis: dict[str, Any] | None = None
     paces: dict[str, str] = field(default_factory=dict)
 
 
@@ -202,8 +205,68 @@ def threshold_from_goal(goal_time_s: float, race_km: float) -> float:
     return v_race / race_speed_factor(race_km)
 
 
+#: Weekly volume a long run of a given distance implies. The two are linked —
+#: a 10 km long run belongs in a week of roughly 25 km, not 60 — so the longest
+#: recent run caps what the history is read as supporting.
+LONG_RUN_VOLUME_RATIO = 2.5
+#: How far back to look for weekly volume. Long enough to see a block of real
+#: training behind a quiet fortnight.
+VOLUME_WINDOW_WEEKS = 12
+
+
+@dataclass
+class VolumeBasis:
+    """Where the plan's starting volume came from, with the numbers behind it.
+
+    Reported in full because this single figure decides the whole block — peak
+    volume, the long-run ramp, session distances — and an athlete who disagrees
+    with it should be able to see why it was chosen before overriding it.
+    """
+
+    start_km: float | None
+    recent_km: float | None = None
+    median_km: float | None = None
+    best_km: float | None = None
+    longest_run_km: float | None = None
+    weeks_idle: int = 0
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "start_km": self.start_km,
+            "recent_km": self.recent_km,
+            "median_km": self.median_km,
+            "best_km": self.best_km,
+            "longest_run_km": self.longest_run_km,
+            "weeks_idle": self.weeks_idle,
+        }
+
+
+def _weekly_buckets(
+    activities: list[dict[str, Any]], today: date, weeks: int
+) -> dict[date, float]:
+    """Running kilometres per calendar week, for the last `weeks` weeks."""
+    buckets: dict[date, float] = {}
+    first = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
+    for a in _running(activities):
+        try:
+            day = date.fromisoformat(str(a.get("start_local") or "")[:10])
+        except ValueError:
+            continue
+        monday = day - timedelta(days=day.weekday())
+        if monday < first or day > today:
+            continue
+        buckets[monday] = buckets.get(monday, 0.0) + float(a["distance_m"]) / 1000.0
+    return buckets
+
+
 def observed_weekly_km(activities: list[dict[str, Any]], weeks: int = 4) -> float | None:
-    """Average weekly running volume over the last `weeks` weeks of data."""
+    """Mean weekly running volume over the last `weeks` weeks, zeros included.
+
+    Kept because it answers a real question — "how much have they run lately" —
+    but it is the wrong number to start a block from, and `weekly_volume` is what
+    `build_plan` uses. Four quiet weeks after a summer of 30 km weeks average out
+    to a figure that describes neither.
+    """
     runs = _running(activities)
     if not runs:
         return None
@@ -220,6 +283,68 @@ def observed_weekly_km(activities: list[dict[str, Any]], weeks: int = 4) -> floa
             total += float(a["distance_m"]) / 1000.0
             seen = True
     return round(total / weeks, 1) if seen else None
+
+
+def weekly_volume(
+    activities: list[dict[str, Any]],
+    today: date | None = None,
+    weeks: int = VOLUME_WINDOW_WEEKS,
+) -> VolumeBasis:
+    """What weekly volume the history says this athlete can start from.
+
+    A mean over four weeks is what `observed_weekly_km` gives and it under-reads
+    badly: someone who ran 24, 36 and 30 km weeks in July, took a month off and
+    has two 9 km weeks behind them comes out at 4.5 km/week, which describes no
+    week they have ever run. The plan built on it never reaches a long run worth
+    the race.
+
+    So: the **median of the weeks they actually ran** over a longer window, held
+    down by two things. It may not exceed what the longest recent run supports
+    (`LONG_RUN_VOLUME_RATIO`), because volume and long run move together. And it
+    is cut for time off — a fortnight idle is not the same athlete, and the
+    figure should say so rather than plan for who they were.
+
+    Never below the recent mean: whatever else is true, they are running that.
+    """
+    today = today or date.today()
+    buckets = _weekly_buckets(activities, today, weeks)
+    active = sorted(v for v in buckets.values() if v > 0)
+    recent = observed_weekly_km(activities)
+    longest = longest_recent_run_km(activities, today)
+
+    if not active:
+        return VolumeBasis(start_km=None, recent_km=recent, longest_run_km=longest)
+
+    last_run = max(buckets)
+    weeks_idle = max(0, (today - last_run).days // 7)
+
+    median_km = round(statistics.median(active), 1)
+    best_km = round(active[-1], 1)
+
+    start = median_km
+    if longest and weeks_idle == 0:
+        # Volume and long run move together, so a history of short runs caps how
+        # much weekly volume it is read as supporting. Only while they are still
+        # running: after a break the "longest recent run" is itself stale, and
+        # applying both this and the detraining cut below punishes twice for the
+        # same fortnight off.
+        start = min(start, longest * LONG_RUN_VOLUME_RATIO)
+    if weeks_idle >= 2:
+        # Detraining. Two weeks off is a nudge, a month off is a different
+        # athlete — but not a beginner: a month off 28 km weeks comes back
+        # nearer 17 than 8, so the cut floors at half.
+        start *= max(0.5, 0.85 ** min(weeks_idle - 1, 4))
+    if recent:
+        start = max(start, recent)
+
+    return VolumeBasis(
+        start_km=round(start, 1),
+        recent_km=recent,
+        median_km=median_km,
+        best_km=best_km,
+        longest_run_km=longest,
+        weeks_idle=weeks_idle,
+    )
 
 
 def pace_range(threshold_mps: float, key: str) -> tuple[float, float]:
@@ -701,8 +826,18 @@ def _steps_intervals(
     warmup_s: int = 900,
     cooldown_s: int = 600,
 ) -> list[dict[str, Any]]:
+    # Warmup and cooldown carry the easy band. Without it the watch shows a bare
+    # countdown, and a quarter of an hour with nothing to chase is where an
+    # athlete who habitually runs too hard arrives at the first rep already
+    # tired. Recovery steps stay untargeted on purpose: the jog between reps
+    # should be as slow as it needs to be.
+    easy_target = {
+        "type": "pace",
+        "low_mps": round(easy[0], 3),
+        "high_mps": round(easy[1], 3),
+    }
     return [
-        {"kind": "warmup", "duration_s": warmup_s},
+        {"kind": "warmup", "duration_s": warmup_s, "target": dict(easy_target)},
         {
             "kind": "repeat",
             "iterations": reps,
@@ -719,7 +854,7 @@ def _steps_intervals(
                 {"kind": "recovery", "duration_s": rest_s},
             ],
         },
-        {"kind": "cooldown", "duration_s": cooldown_s},
+        {"kind": "cooldown", "duration_s": cooldown_s, "target": dict(easy_target)},
     ]
 
 
@@ -953,9 +1088,10 @@ def build_plan(
                 "from. Enter a goal time, or sync some runs first."
             )
 
-    observed = observed_weekly_km(activities)
+    volume = weekly_volume(activities, today)
+    derived = volume.start_km
     stated = inp.weekly_km if inp.weekly_km else None
-    start_km = stated or observed or max(15.0, inp.race_km * 0.8)
+    start_km = stated or derived or max(15.0, inp.race_km * 0.8)
     # A plan cannot start below what its own session structure implies.
     floor = max(inp.runs_per_week * 4.0, 12.0)
     if start_km < floor:
@@ -966,24 +1102,37 @@ def build_plan(
             )
         else:
             warnings.append(
-                f"Only {start_km:g} km/week found in recent activities — starting from "
-                f"{floor:g} km instead. Set your current weekly km if that is wrong."
+                f"Your history reads as {start_km:g} km/week — starting from "
+                f"{floor:g} km instead, which is what {inp.runs_per_week} runs a week "
+                "needs to be worth doing. Set your current weekly km if that is wrong."
             )
         start_km = floor
-    if stated is None and observed is None:
+    elif derived and not stated:
+        parts = [f"median of the weeks you ran is {volume.median_km:g} km"]
+        if volume.longest_run_km:
+            parts.append(f"longest recent run {volume.longest_run_km:g} km")
+        if volume.weeks_idle >= 2:
+            parts.append(f"{volume.weeks_idle} weeks since your last run")
+        warnings.append(
+            f"Starting from {derived:g} km/week, read from your history — "
+            + ", ".join(parts)
+            + ". Set your current weekly km to override it."
+        )
+    if stated is None and derived is None:
         warnings.append(
             "No recent volume found — assumed a modest starting week. Set your current "
             "weekly km for a plan that fits where you actually are."
         )
     # A stated volume is taken at face value, but it is worth saying out loud when
-    # it is far ahead of what the athlete has actually been running: the plan then
-    # opens with a jump no ramp inside it can undo.
-    if stated and observed is not None and stated > observed * 1.5:
+    # it runs well ahead of what the history supports: the plan then opens with a
+    # jump no ramp inside it can undo. Compared against the derived figure, not
+    # the four-week mean, which under-reads anyone returning from a break.
+    if stated and derived and stated > derived * 1.5:
         warnings.append(
-            f"You entered {stated:g} km/week but recent activities show about "
-            f"{observed:g} km/week. The plan is built on {stated:g} km, so week 1 asks "
-            f"for roughly {stated / max(observed, 0.1):.0f}x your current volume — "
-            "lower it if that is not deliberate."
+            f"You entered {stated:g} km/week; your history reads as {derived:g} km/week "
+            f"(median of the weeks you ran, {volume.median_km:g} km; best recent week "
+            f"{volume.best_km:g} km). The plan is built on {stated:g} km — lower it if "
+            "that is not deliberate."
         )
 
     # Sanity-check the goal against observed fitness.
@@ -1003,7 +1152,9 @@ def build_plan(
         source=source,
         threshold_mps=round(threshold, 4),
         projected_race_time=fmt_duration(projected),
-        weekly_km_observed=observed,
+        weekly_km_observed=volume.recent_km,
+        weekly_km_start=round(start_km, 1),
+        volume_basis=volume.as_json(),
         paces={
             "recovery": pace_label(threshold, "recovery"),
             "easy": pace_label(threshold, "easy"),
@@ -1311,6 +1462,8 @@ def build_plan(
             "reference": basis.reference,
             "reference_activity_id": basis.reference_activity_id,
             "weekly_km_observed": basis.weekly_km_observed,
+            "weekly_km_start": basis.weekly_km_start,
+            "volume_basis": basis.volume_basis,
             "paces": basis.paces,
         },
         "warnings": warnings,

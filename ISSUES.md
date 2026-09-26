@@ -1,130 +1,88 @@
 # FitStack — tracked issues
 
-Opened 2026-09-17, from an audit of `planner.py` against marathon-training
-literature plus the author's own Garmin data (observed 4.5 km/week, 1 of 26 runs
-in zone 2, threshold 5:31/km off a 5 km in 26:08, marathon 2027-04-25).
+Tracking lives on GitHub: <https://github.com/Szpytma/fitstack/issues>. This file
+is the offline summary.
 
-Priority: **P1** blocks using the app to train for the marathon · **P2** wrong or
-missing signal · **P3** quality of life.
-
----
-
-## #1 — P1 — Long run never progresses beyond ~16 km on a marathon block
-
-`long_run_km` (`backend/app/planner.py:258`) takes 30–33% of the week, and
-`peak_volume` (`planner.py:252`) caps weekly volume at `start_km * 1.6`. So the
-long run is structurally bounded by the start volume, and `_LONG_RUN_CAP`'s 32 km
-for the marathon (`planner.py:63`) is unreachable below ~97 km/week.
-
-Computed for this account (start 30 km, 42.195 km, 24 weeks): peak week 48.0 km,
-**longest run in the whole block 15.8 km** (week 21). That is a half-marathon
-plan wearing a marathon label.
-
-Fix: make the long run progress in absolute terms toward a marathon-appropriate
-peak, time-capped rather than distance-capped — 2.5–3 h, which at this athlete's
-long pace (7:05–7:53/km) is ~23–25 km, not 32. The share-of-week rule stays as a
-ceiling, not as the only driver.
-
-Acceptance: a 24-week marathon block off 30 km/week peaks its long run above
-20 km, and no long run exceeds 3 h at the plan's own long pace.
+Priority: **P1** blocks trusting the app to train on · **P2** wrong or missing
+signal · **P3** quality of life.
 
 ---
 
-## #2 — P1 — Stated weekly volume is never sanity-checked against observed
+## Done (2026-09-17)
 
-`build_plan` (`planner.py:723`) takes `stated or observed`. `floor`
-(`planner.py:725`) only ever *raises* a too-small number, and the goal-time sanity
-check (`planner.py:744`) has no volume equivalent. Typing 30 km/week against an
-observed 4.5 km/week produces a week-1 plan of 30 km over 4 runs — a ~7× jump —
-silently, with no warning.
+The first round came out of an audit of `planner.py` against marathon-training
+literature plus this account's own Garmin history.
 
-Fix: when `stated` exceeds `observed` by more than ~50%, append a warning naming
-both numbers. Consider starting nearer the observed figure unless the athlete
-confirms.
+| # | what | shipped in |
+|---|---|---|
+| 1 | Long run never progressed past ~16 km on a marathon block | #9 |
+| 2 | Stated weekly volume never checked against history | #9 |
+| 3 | Race beyond the 24-week cap left the current week returning 400 | #10 |
+| 4 | No guard on single-run progression (+10% vs 30-day longest) | #10 |
+| 5 | Interval sessions read as whole-activity averages | #11 |
+| 7 | Workout steps were time-based only — "10 × 1 km" inexpressible | #12 |
+| 6 | Plan sessions could not be previewed before being pushed | #16 |
+| 8 | No marathon-pace work inside long runs | #15 |
+| — | Starting volume read from a four-week mean including zero weeks | #17 |
+| — | Warmup and cooldown reached the watch with no pace target | #17 |
 
-Acceptance: stated 30 vs observed 4.5 surfaces a warning in `warnings`.
-
----
-
-## #3 — P2 — No guard on single-run progression
-
-A BJSM cohort of 5200+ runners found materially higher overuse-injury risk when a
-*single run* exceeds 110% of the longest run in the previous 30 days, independent
-of weekly volume. The planner has no such rule: week 1 here prescribes a 9.0 km
-long run against a 5.0 km 30-day longest (+80%).
-
-Fix: clamp the first weeks' long runs to 110% of the 30-day longest observed run,
-and warn when clamped. Pure computation over activities — belongs next to
-`adapt.py`.
+Two of these were fixed by the same PR for a reason. #4's progression clamp was
+defeated on its first outing by the spill rule, which exists to stop an easy day
+out-distancing the long run and did so by pushing the long run back up past the
+ceiling that had just been computed.
 
 ---
 
-## #4 — P1 — Race more than 24 weeks out leaves the current week unreachable
+## Open
 
-`total_weeks = max(4, min(24, days_out // 7))` (`planner.py:701`) caps the block at
-24 weeks and anchors it *backwards* from race day. Started 2026-09-17 for a
-2027-04-25 marathon (31 weeks), the block runs 2026-11-09 → 2027-04-25, so
-`GET /plan/week?offset=0` returns 400:
+### #18 — P1 — No tests at all for 2825 lines of planning logic
 
-> No plan week starts on 2026-09-21 — this block runs 2026-11-09 to 2027-04-25.
+Pure computation, no I/O, fully deterministic — the easiest code here to test,
+and there is not one test. Everything verified so far was checked with throwaway
+scripts. Golden snapshot of a block, taper never rises, clamp survives spill,
+replay identity, `weekly_volume` edge cases, `laps.is_structured` on real runs.
 
-Offsets 0–6 all 400. For seven weeks the rolling plan shows nothing at all.
+### #19 — P1 — The write path to Garmin has still never been exercised
 
-Fix: when the race is further out than the cap, fill the lead-in — the aerobic
-base block (`base_plan.py`) is the right occupant of exactly that window — or at
-minimum say so instead of erroring.
+`POST /plan/apply` and the unschedule control have never run against the live
+account. Worse since #12: warmup and cooldown on distance are assembled by hand,
+because the library only ships `create_distance_interval_step`. The payload was
+inspected; nothing was ever uploaded. One session, scheduled and deleted, proves
+both.
 
----
+### #20 — P2 — `anchor_weekly_km` is pinned at plan start, but the block can open weeks later
 
-## #5 — P2 — Interval sessions are read as whole-activity averages
+Started 2026-09-17 for a race on 2027-04-25, the block opens 2026-11-09. The
+athlete is asked in September for a number describing November, with seven weeks
+of base training in between whose purpose is to change it. The seam shows:
+lead-in week 7 ends at ~16 km, block week 1 opens at 30 km.
 
-Two places read summary fields and so misread structured sessions
-(e.g. 5 km warmup + 10×1 km + 2 km cooldown):
+### #21 — P2 — Marathon runway warning does not fire at exactly 12 weeks
 
-- `adapt.efficiency_factor` (`adapt.py:119`) uses `avg_hr` / `avg_speed_mps`. An
-  interval session typically averages 80–85% HRmax, passes the aerobic window
-  (`AEROBIC_LO/HI = 0.60/0.85`) and pollutes the weekly EF median with a number
-  that blends reps and jog recoveries.
-- `threshold_from_activities` (`planner.py:142`) runs Riegel over the whole
-  activity, so a strong 10×1 km projects as a slow 10K and never registers as
-  fitness — the best threshold measurement of the week is discarded.
+The condition is `total_weeks < 12`; the message says "16+ is the usual runway".
+A 12- to 15-week marathon block is warned about not at all. The account's current
+plan is exactly 12 weeks.
 
-Per-lap data already exists (`get_activity_splits` → `lapDTOs`,
-`providers/garmin.py:164`) but only in the single-activity detail endpoint.
+### #22 — P3 — Dev loop: `uvicorn --reload` never completes, and the old worker keeps the port
 
-Fix: (a) exclude structured sessions from EF; (b) read laps for quality sessions
-and derive threshold from the rep average. (a) alone silences the noise; (b)
-recovers the signal.
-
----
-
-## #6 — P2 — Plan sessions cannot be previewed before they are pushed
-
-`SessionRow` (`frontend/src/components/RollingPlanCard.tsx:139`) renders one line
-per session — day, title, km, band. The `spec` is present in the data but used
-only for the push (line 184). Step structure is visible only via
-`WorkoutPreview` → `StepList`, which takes a `workout_id` and therefore works only
-after the workout exists in Garmin.
-
-Fix: expand a session row into its steps. `StepList` is already exported
-(`WorkoutPreview.tsx:106`); it needs an adapter from the plan's `WorkoutStep`
-shape to `WorkoutDetailStep`.
+The reloader logs the change and never starts a new worker; killing the parent
+leaves an orphan holding port 8000, so a fresh backend fails to bind and requests
+are still answered by the old code.
 
 ---
 
-## #7 — P3 — Workout steps are time-based only
+## Known and deliberate
 
-`WorkoutStep` (`backend/app/schemas/health.py:149`) carries `duration_s` and no
-distance, and `create_running_workout` (`providers/garmin.py:447`) builds every
-step with `create_*_step(dur, …)`. "10×1 km" is therefore not expressible — it
-becomes "10×4:00".
+- **Recovery steps carry no pace target.** The jog between reps should be as slow
+  as it needs to be.
+- **Easy runs and long runs have no separate warmup.** An easy run is its own
+  warmup. In a marathon-pace long run the easy lead-in *is* the warmup, and
+  putting a separate one in front would defeat the session — the point is goal
+  pace on tired legs.
+- **The long run may exceed 33% of the week.** For a low-volume marathoner it has
+  to; `MAX_LONG_SHARE` (40%) is the backstop.
 
-Fix: add `distance_m` to the step schema and the matching Garmin end condition.
+## Not yet examined
 
----
-
-## #8 — P3 — No marathon-pace work inside long runs
-
-`quality_session` (`planner.py:520`) gives the peak phase a standalone
-`Race pace N×15min`, and long runs are always entirely easy. Marathon-pace
-segments inside the long run are a staple of marathon preparation.
+`retarget.py` and `review.py` were never read during the audit. The rest of the
+planning modules were.
