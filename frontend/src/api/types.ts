@@ -229,7 +229,19 @@ export interface PlanBasis {
   reference?: string | null;
   reference_activity_id?: number | null;
   weekly_km_observed?: number | null;
+  /** What the block was actually built from, and the numbers behind it. */
+  weekly_km_start?: number | null;
+  volume_basis?: VolumeBasis | null;
   paces: Record<string, string>;
+}
+
+export interface VolumeBasis {
+  start_km?: number | null;
+  recent_km?: number | null;
+  median_km?: number | null;
+  best_km?: number | null;
+  longest_run_km?: number | null;
+  weeks_idle?: number;
 }
 
 export type PlanTargetMode = "pace" | "hr";

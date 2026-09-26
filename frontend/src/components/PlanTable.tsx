@@ -207,12 +207,23 @@ export function PlanTable({
                 <>.</>
               )}
             </div>
-            {plan.basis.weekly_km_observed != null && (
+            {plan.basis.weekly_km_start != null && (
               <div>
-                Recent volume in your Garmin data:{" "}
+                Built from{" "}
                 <span className="text-slate-200">
-                  {plan.basis.weekly_km_observed} km/week
+                  {plan.basis.weekly_km_start} km/week
                 </span>
+                {plan.basis.volume_basis?.median_km != null && (
+                  <>
+                    {" "}
+                    — median of the weeks you ran is{" "}
+                    {plan.basis.volume_basis.median_km} km, best recent week{" "}
+                    {plan.basis.volume_basis.best_km} km
+                    {plan.basis.volume_basis.longest_run_km != null && (
+                      <>, longest run {plan.basis.volume_basis.longest_run_km} km</>
+                    )}
+                  </>
+                )}
                 .
               </div>
             )}

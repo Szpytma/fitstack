@@ -83,6 +83,17 @@ class PlanWeek(BaseModel):
     sessions: list[PlanSession]
 
 
+class VolumeBasisOut(BaseModel):
+    """How the starting weekly volume was read from the athlete's history."""
+
+    start_km: float | None = None
+    recent_km: float | None = None
+    median_km: float | None = None
+    best_km: float | None = None
+    longest_run_km: float | None = None
+    weeks_idle: int = 0
+
+
 class PlanBasis(BaseModel):
     source: Literal["goal_time", "recent_activities", "stated_volume"]
     threshold_mps: float
@@ -91,6 +102,9 @@ class PlanBasis(BaseModel):
     reference: str | None = None
     reference_activity_id: int | None = None
     weekly_km_observed: float | None = None
+    #: The volume the block was actually built from, and where it came from.
+    weekly_km_start: float | None = None
+    volume_basis: VolumeBasisOut | None = None
     paces: dict[str, str]
 
 
