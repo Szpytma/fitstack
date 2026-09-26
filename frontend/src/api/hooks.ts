@@ -13,6 +13,14 @@ function todayLocalISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Paths never change while the backend is up, so this is fetched once. */
+export const useMcpPaths = () =>
+  useQuery({
+    queryKey: ["mcp-paths"],
+    queryFn: api.mcpPaths,
+    staleTime: Infinity,
+  });
+
 export const useToday = () =>
   useQuery({
     queryKey: ["today"],

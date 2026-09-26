@@ -1,9 +1,0 @@
-{
-  "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": [
-    "fitstack"
-  ],
-  "disabledMcpjsonServers": [
-    "fitstack"
-  ]
-}

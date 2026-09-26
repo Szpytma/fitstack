@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "fitstack": {
-      "command": "C:/Users/szpyt/source/repos/fitstack/backend/.venv/Scripts/python.exe",
-      "args": ["-m", "app.mcp_server"],
-      "cwd": "C:/Users/szpyt/source/repos/fitstack/backend"
-    }
-  }
-}

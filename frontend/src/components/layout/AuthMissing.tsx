@@ -19,13 +19,21 @@ export function AuthMissing({ detail }: { detail?: string }) {
           prompted for your email, password, and MFA code if enabled):
         </p>
         <pre className="mt-3 p-3 rounded-lg bg-slate-950 border border-slate-800 text-emerald-300 text-xs overflow-x-auto">
-{`cd C:\\Users\\szpyt\\source\\repos\\python-garminconnect
-.venv\\Scripts\\python.exe example.py`}
+{`git clone https://github.com/cyberjunky/python-garminconnect
+cd python-garminconnect
+pip install -e .
+python example.py`}
         </pre>
         <p className="mt-3 text-amber-100/70 text-xs">
           Tokens are saved to <code className="px-1 py-0.5 rounded bg-slate-800">~/.garminconnect/garmin_tokens.json</code>{" "}
           and auto-refresh, so you should only need to do this once (or when
           your refresh token expires). Once done, reload this page.
+        </p>
+        <p className="mt-2 text-amber-100/70 text-xs">
+          Ran it on another machine? Upload the resulting{" "}
+          <code className="px-1 py-0.5 rounded bg-slate-800">garmin_tokens.json</code>{" "}
+          on the Account page instead — FitStack stores it per account and still
+          never sees a Garmin password.
         </p>
         {detail && (
           <p className="mt-4 text-xs text-amber-200/50">
