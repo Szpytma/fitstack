@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # intact either way — this only decides whether it is consulted.
     fitstack_require_auth: bool = True
 
+    # Off by default. uvicorn's reloader has been seen to detect a change,
+    # never bring up a replacement worker, and leave the old one holding
+    # 127.0.0.1:8000 — so the backend keeps answering from stale code while
+    # looking alive. A restart you typed yourself is slower and honest.
+    fitstack_reload: bool = False
+
     strava_client_id: str = ""
     strava_client_secret: str = ""
 

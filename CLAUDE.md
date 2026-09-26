@@ -220,6 +220,12 @@ highest run HRs, and says so in `warnings`.
   404 for the user's ATP — library gap. Workout templates + scheduled workouts work.
 - **Steps not showing** usually means Bluetooth sync is off on the watch, not a
   code bug.
+- **Hot reload is off by default** (`FITSTACK_RELOAD`). uvicorn's reloader has
+  been seen to log a detected change and never start the replacement worker,
+  leaving the old one holding `127.0.0.1:8000` — so the backend answers from
+  stale code while looking healthy, and a fresh start fails with `[Errno 10048]`.
+  If that happens, find the orphan before restarting:
+  `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`.
 - **`/health/sleep-history` and `/summary-history`** walk back one provider call
   per day — 14 days ≈ 4s, and `days` accepts up to 60. Gaps are normal (watch off
   the wrist) so a short list is valid, but `_collect_days` logs every skipped day
