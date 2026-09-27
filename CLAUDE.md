@@ -15,7 +15,7 @@ for Strava, but Strava is **not** implemented (their API moved behind subscripti
   Runs on `localhost:5173` (Windows quirk: Vite listens IPv6-only, don't use
   `127.0.0.1:5173`).
 - **MCP** — `mcp>=2.0.0` (`mcp.server.MCPServer`), stdio transport.
-  20 tools exposed in `backend/app/mcp_server.py`.
+  23 tools exposed in `backend/app/mcp_server.py`.
 
 ## Layout
 
@@ -34,6 +34,7 @@ fitstack/
 │       ├── mcp_server.py       # MCP stdio server, reuses GarminProvider
 │       ├── planner.py          # race-plan engine — pure computation, no I/O
 │       ├── base_plan.py        # zone 2 base block — HR in, minutes out
+│       ├── strength_plan.py    # gym block on the running days
 │       ├── adapt.py            # week-to-week adaptation rules (deterministic)
 │       ├── active_plan.py      # the rolling plan's pinned anchor (only persisted state)
 │       ├── providers/
@@ -81,7 +82,7 @@ Missing tokens → backend returns HTTP 412, frontend `App.tsx` detects via
 
 ## MCP integration
 
-The MCP server exposes 20 tools (15 read + 5 Garmin writes). Any Claude client can use it
+The MCP server exposes 23 tools (17 read + 6 Garmin writes). Any Claude client can use it
 to build training plans, correlate sleep/HR, create/schedule workouts, etc. **No
 Anthropic API key needed** — the client handles the LLM side.
 
@@ -153,6 +154,46 @@ Why it exists: the mode was written for an account whose easy runs almost all
 landed in zone 3 rather than zone 2. That is the grey-zone trap, and a race plan
 with threshold and VO2 work stacked on top of it is how people get cooked. Check
 the zone split of recent runs before reaching for a race plan.
+
+## Strength (`strength_plan.py`)
+
+Gym work placed on the days the athlete already runs — lifting in the evening,
+running in the morning — so the rest days stay genuinely restful. Spreading the
+sessions out instead leaves no day where the body is left alone.
+
+**The long-run day carries no loaded leg work.** That single rule shapes the whole
+module: squats on the evening of the week's longest run buy soreness that costs
+the next two runs and return nothing. That day gets upper body and hips instead.
+The rule follows the *day*, not the label — move the long run and the leg work
+moves off it, which is what `test_long_run_day_rule_follows_the_day_not_the_name`
+pins.
+
+Volume is low and reps few on purpose: strength for a runner, not hypertrophy.
+Weights are never prescribed — the athlete's working loads are theirs to know, and
+a number invented here would be useless or dangerous. Progression runs in
+four-week blocks whose down weeks line up with `base_plan.minutes_curve`, so the
+easy week is easy in both disciplines at once.
+
+`strength_days` lives on `ActivePlan`, not in a second state file, so the strength
+block shares the running block's `start_date` and `weeks` by construction. Two
+anchors would drift apart within a month.
+
+### Garmin's exercise catalogue, the hard way
+
+- **The (category, exercise) pair is validated.** Pass an exercise with a category
+  it does not belong to and the upload succeeds while silently dropping the
+  exercise name — the watch then shows a blank movement. Never override
+  `category`; let the provider resolve it from the display name.
+- **An exercise whose key equals its category comes back blank** (`CALF_RAISE`,
+  `CARDIO`, `INDOOR_BIKE`). Harmless: the category alone renders correctly.
+- **A rowing machine is not representable.** It exists only as "Calorie Row",
+  which the catalogue files under `LATERAL_RAISE` — Garmin's own miscategorisation.
+  **A ski erg is absent entirely.** Machines that do round-trip cleanly:
+  `Treadmill`, `Stair Stepper`, `Elliptical`, `Indoor Bike`. Use `Cardio` for
+  anything else and let the athlete pick the machine.
+- **Warm-ups are time-based, every strength builder is rep-based.** The timed step
+  is assembled by hand in `GarminProvider.create_strength_workout`; `ExecutableStep`
+  allows extras, which is how the exercise category rides along with it.
 
 ## Adaptation (`adapt.py`)
 
@@ -290,6 +331,22 @@ threshold workout with warmup and cooldown can out-distance it.
   the latter replays the block identically.
 - **`PlanWeek.index` is 1-based** (`planner.py:860`), unlike the 0-based `week_idx`
   that `phase_for` and `volume_curve` take internally.
+- **One template per scheduled date — never share one across days.** Garmin
+  Connect is happy to hold a template on many dates, and the calendar shows both.
+  *The watch is not*: completing the workout marks the **template** done and drops
+  it from the device, taking every other date that shares it. A base week with two
+  identical easy runs lost the second one off the wrist while Connect still listed
+  it. `/plan/apply` and `/strength/apply` therefore key on `(date, spec)`. The
+  extra templates are the price of sessions that stay on the watch — which is also
+  why a whole block should be pushed a week at a time, not at once.
+- **A week ending today is finished.** The cadence this is built for is "ask after
+  the Sunday long run", so on that Sunday the week just run has to count as
+  evidence. `adapt.completed_weeks` and `active_plan.compliance` use `end > today`
+  to exclude, not `end >= today`.
+- **Re-basing a plan must keep the weeks already run inside it.** Restarting with
+  `start_date = today` drops them: the week numbering lies, and `adapt` loses the
+  history it judges against — it sees zero finished weeks and never fires a rule.
+  `PlanRequest.start_date` backdates the anchor for exactly this.
 - **Never key scheduled workouts on `workout_id`** — anywhere. One template
   legitimately recurs across many dates, so keying on it drops every date after the
   first. `UpcomingWorkouts` uses `scheduled_id` for its React keys, and

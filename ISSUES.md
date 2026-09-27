@@ -33,6 +33,23 @@ ceiling that had just been computed.
 
 ---
 
+## Done (2026-09-27)
+
+| # | what | shipped in |
+|---|---|---|
+| 27 | Strength blocks: planner, provider, API, MCP and UI | #28 |
+| — | One template per scheduled date — shared templates vanished off the watch | #28 |
+| — | A week ending today counted as unfinished, so the Sunday ask missed it | #28 |
+| — | Re-basing a plan dropped the weeks already run | #28 |
+
+The three fixes came out of building the strength block, not from an audit. The
+template one had been misdiagnosed twice: first blamed on Garmin Connect refusing
+duplicate scheduling (it does not), then on `upcoming_workouts` deduplicating by
+`workoutId` (real, but a different bug). The actual cause is the **watch**, which
+ties completion to the template and drops every date sharing it.
+
+---
+
 ## Open
 
 ### #18 — P1 — No tests at all for 2825 lines of planning logic
@@ -42,13 +59,14 @@ and there is not one test. Everything verified so far was checked with throwaway
 scripts. Golden snapshot of a block, taper never rises, clamp survives spill,
 replay identity, `weekly_volume` edge cases, `laps.is_structured` on real runs.
 
-### #19 — P1 — The write path to Garmin has still never been exercised
+### #19 — P2 — Distance-based warmup/cooldown still never uploaded
 
-`POST /plan/apply` and the unschedule control have never run against the live
-account. Worse since #12: warmup and cooldown on distance are assembled by hand,
-because the library only ships `create_distance_interval_step`. The payload was
-inspected; nothing was ever uploaded. One session, scheduled and deleted, proves
-both.
+Downgraded from P1 and narrowed. `POST /plan/apply`, `unschedule` and `delete`
+have now all run against the live account many times over — a full base week
+scheduled, removed and re-pushed, plus the new strength path. What remains
+untested is the *distance* variant from #12: warmup and cooldown on distance are
+assembled by hand because the library only ships
+`create_distance_interval_step`, and no race plan has been pushed since.
 
 ### #20 — P2 — `anchor_weekly_km` is pinned at plan start, but the block can open weeks later
 

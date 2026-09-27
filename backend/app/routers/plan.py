@@ -116,7 +116,7 @@ def start_rolling(
     and week-one volume are pinned.
     """
     activities, hr_zones = _plan_context(provider, req.target_mode, req.use_history)
-    today = date.today()
+    today = req.start_date or date.today()
 
     try:
         if req.mode == "base":
@@ -235,11 +235,19 @@ def apply(
     req: PlanApplyRequest,
     provider: FitnessProvider = Depends(get_garmin),
 ) -> PlanApplyResult:
-    """One template per distinct session, scheduled on every date it recurs.
+    """One template per scheduled date. Never the same template on two days.
 
-    A 12-week plan has ~50 sessions but only a handful of shapes, so uploading one
-    template per calendar day would litter the account. Garmin is happy to hold one
-    template on many dates — each scheduling call returns its own instance id.
+    Garmin Connect is happy to hold one template on many dates — each scheduling
+    call returns its own instance id, and the calendar shows both. **The watch is
+    not.** Completing a workout marks the *template* done and drops it from the
+    device, taking every other date that shares it: a base week with Wednesday and
+    Friday both "Easy 39 min" lost Friday off the wrist the moment Wednesday was
+    run, while Garmin Connect still listed it.
+
+    So deduplication is deliberately not done here. A 15-week block pushed a week
+    at a time is four templates a week, which is a fair price for sessions that
+    stay on the watch. Pushing a whole block at once would litter the library —
+    prefer the weekly path.
     """
     templates: dict[str, int] = {}
     workout_ids: list[int] = []
@@ -251,7 +259,8 @@ def apply(
         if not spec.get("steps"):
             continue  # race day and rest days carry no workout
 
-        key = json.dumps(spec, sort_keys=True, default=str)
+        # Keyed by date, so identical sessions still get their own template.
+        key = f"{item.date}|{json.dumps(spec, sort_keys=True, default=str)}"
         workout_id = templates.get(key)
 
         if workout_id is None:

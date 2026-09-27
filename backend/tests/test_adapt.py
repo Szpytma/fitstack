@@ -169,3 +169,34 @@ def test_declining_efficiency_holds_volume():
 
     assert d.action == "hold"
     assert d.scale == adapt.STRUGGLE_HOLD
+
+
+def test_a_week_ending_today_counts_as_finished():
+    """The designed cadence is "ask after the Sunday long run" — so on that
+    Sunday the week just run has to be evidence, not still in progress."""
+    from datetime import date
+
+    from app import adapt
+
+    plan = {
+        "weeks": [
+            {
+                "index": 1,
+                "start": "2026-09-21",
+                "end": "2026-09-27",
+                "planned_km": 25.0,
+                "sessions": [],
+            },
+            {
+                "index": 2,
+                "start": "2026-09-28",
+                "end": "2026-10-04",
+                "planned_km": 26.0,
+                "sessions": [],
+            },
+        ]
+    }
+    on_the_sunday = adapt.completed_weeks(
+        plan, before_week=2, activities=[], max_hr=211, today=date(2026, 9, 27)
+    )
+    assert [w.week_number for w in on_the_sunday] == [1]

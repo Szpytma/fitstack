@@ -8,7 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import activities, auth, coach, devices, health, plan, workouts
+from app.routers import (
+    activities,
+    auth,
+    coach,
+    devices,
+    health,
+    plan,
+    strength,
+    workouts,
+)
 from app.routers.auth import AuthDep
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -82,5 +91,6 @@ for _router in (
     workouts.router,
     devices.router,
     plan.router,
+    strength.router,
 ):
     app.include_router(_router, dependencies=[AuthDep])

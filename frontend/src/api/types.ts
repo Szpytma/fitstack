@@ -356,3 +356,71 @@ export interface PlanStatus {
   anchor_weekly_km: number;
   next_week_starts: string;
 }
+
+// ---------- strength ----------
+
+export interface StrengthExercise {
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  rest_s: number;
+  weight_kg?: number | null;
+  category?: string | null;
+}
+
+export interface StrengthWarmup {
+  exercise_name: string;
+  duration_s: number;
+  category?: string | null;
+}
+
+export interface StrengthWorkoutSpec {
+  name: string;
+  estimated_duration_s?: number | null;
+  warmup?: StrengthWarmup | null;
+  exercises: StrengthExercise[];
+}
+
+export type StrengthFocus = "lower" | "upper" | "upper_light";
+
+export interface StrengthSession {
+  date: string;
+  day: string;
+  focus: StrengthFocus;
+  focus_label: string;
+  title: string;
+  note?: string | null;
+  estimated_duration_s?: number | null;
+  warmup?: StrengthWarmup | null;
+  exercises: StrengthExercise[];
+  spec?: StrengthWorkoutSpec | null;
+}
+
+export interface StrengthWeek {
+  index: number;
+  start: string;
+  end: string;
+  sets: number;
+  reps: number;
+  deload: boolean;
+  note?: string | null;
+  sessions: StrengthSession[];
+}
+
+/** One week of the strength block, with where it sits in the arc. */
+export interface StrengthWeekView {
+  plan_name: string;
+  week_number: number;
+  weeks_total: number;
+  days: string[];
+  notes: string[];
+  week: StrengthWeek;
+}
+
+export interface StrengthApplyResult {
+  created: number;
+  scheduled: number;
+  removed: number;
+  failures: string[];
+  workout_ids: number[];
+}

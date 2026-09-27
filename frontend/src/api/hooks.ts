@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { PlanRequest, RunningWorkoutSpec } from "./types";
+import type {
+  PlanRequest,
+  RunningWorkoutSpec,
+  StrengthWorkoutSpec,
+} from "./types";
 
 function yesterdayLocalISO(): string {
   const d = new Date();
@@ -194,6 +198,50 @@ export function useEndRollingPlan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["plan-status"] });
       qc.removeQueries({ queryKey: ["plan-week"] });
+    },
+  });
+}
+
+export function useStrengthWeek(offset = 0, enabled = true) {
+  return useQuery({
+    queryKey: ["strength-week", offset],
+    queryFn: () => api.strengthWeek(offset),
+    enabled,
+    // 404 means "no strength block attached", which the UI handles as a state.
+    retry: false,
+  });
+}
+
+export function useEnableStrength() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (days: string[]) => api.strengthEnable(days),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["strength-week"] });
+      qc.invalidateQueries({ queryKey: ["plan-status"] });
+    },
+  });
+}
+
+export function useDisableStrength() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.strengthDisable(),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ["strength-week"] });
+      qc.invalidateQueries({ queryKey: ["plan-status"] });
+    },
+  });
+}
+
+export function useApplyStrength() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessions: { date: string; spec: StrengthWorkoutSpec }[]) =>
+      api.strengthApply(sessions),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workouts"] });
+      qc.invalidateQueries({ queryKey: ["upcoming"] });
     },
   });
 }

@@ -557,6 +557,122 @@ class GarminProvider(FitnessProvider):
         result = self._login().update_workout(int(workout_id), body)
         return {"workout_id": int(workout_id), "raw": result}
 
+    def create_strength_workout(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """spec = {name, exercises: [{category, exercise_name?, sets, reps, rest_s, weight_kg?}]}.
+
+        Each exercise becomes one repeat group — the "N Sets" block the Garmin
+        editor shows — so the watch counts sets and rests for you. `category` must
+        be one of `garminconnect.exercises.CATEGORIES`; `exercise_name` narrows it
+        to a variant and is validated against the catalogue, because a bad name
+        uploads cleanly and then shows as a blank exercise on the device.
+        """
+        from garminconnect.exercises import BY_NAME, CATEGORIES, EXERCISES
+        from garminconnect.workout import (
+            ConditionType,
+            ExecutableStep,
+            StepType,
+            StrengthWorkout,
+            TargetType,
+            WorkoutSegment,
+            create_strength_set,
+        )
+
+        # The catalogue keys entries by display name ("Barbell Bench Press") and
+        # carries the key Garmin actually wants ("BARBELL_BENCH_PRESS"). Accept
+        # either spelling and resolve, because an unrecognised name uploads
+        # cleanly and then shows as a blank exercise on the watch.
+        by_key = {e["exercise"]: e for e in EXERCISES}
+
+        def resolve(raw: str, override: str | None = None) -> tuple[str, str]:
+            """(category, exercise key) for a display name or key."""
+            raw = (raw or "").strip()
+            entry = BY_NAME.get(raw) or by_key.get(raw.upper().replace(" ", "_"))
+            if raw and entry is None:
+                raise ValueError(
+                    f"unknown exercise {raw!r} — use a display name from "
+                    f"garminconnect.exercises, e.g. 'Barbell Bench Press'"
+                )
+            category = str(override or (entry or {}).get("category") or "").upper()
+            if category not in CATEGORIES:
+                raise ValueError(
+                    f"unknown exercise category {category!r} — "
+                    f"see garminconnect.exercises.CATEGORIES"
+                )
+            return category, (entry or {}).get("exercise", "")
+
+        steps = []
+        order = 1
+
+        # An optional machine warm-up, held on *time* rather than reps. The
+        # strength builders are all rep-based, so this step is assembled here —
+        # `ExecutableStep` allows extras, which is how the exercise category
+        # rides along with a timed step.
+        warm = spec.get("warmup")
+        if warm:
+            category, name = resolve(
+                str(warm.get("exercise_name") or ""), warm.get("category")
+            )
+            steps.append(
+                ExecutableStep(
+                    stepOrder=order,
+                    stepType={
+                        "stepTypeId": StepType.WARMUP,
+                        "stepTypeKey": "warmup",
+                        "displayOrder": 1,
+                    },
+                    endCondition={
+                        "conditionTypeId": ConditionType.TIME,
+                        "conditionTypeKey": "time",
+                        "displayOrder": 2,
+                        "displayable": True,
+                    },
+                    endConditionValue=float(warm.get("duration_s") or 600),
+                    targetType={
+                        "workoutTargetTypeId": TargetType.NO_TARGET,
+                        "workoutTargetTypeKey": "no.target",
+                        "displayOrder": 1,
+                    },
+                    category=category,
+                    exerciseName=name,
+                )
+            )
+            order += 1
+
+        for ex in spec.get("exercises") or []:
+            category, name = resolve(
+                str(ex.get("exercise_name") or ""), ex.get("category")
+            )
+            steps.append(
+                create_strength_set(
+                    category,
+                    step_order=order,
+                    sets=int(ex.get("sets") or 3),
+                    reps=int(ex.get("reps") or 10),
+                    rest_seconds=float(ex.get("rest_s") or 90),
+                    exercise_name=name,
+                    weight_kg=ex.get("weight_kg"),
+                )
+            )
+            # The group takes `order`, its exercise and rest steps the next two.
+            order += 3
+
+        if not steps:
+            raise ValueError("a strength workout needs at least one exercise")
+
+        workout = StrengthWorkout(
+            workoutName=str(spec.get("name") or "Strength")[:100],
+            estimatedDurationInSecs=int(spec.get("estimated_duration_s") or 0),
+            workoutSegments=[
+                WorkoutSegment(
+                    segmentOrder=1,
+                    sportType={"sportTypeId": 5, "sportTypeKey": "strength_training"},
+                    workoutSteps=steps,
+                )
+            ],
+        )
+        r = self._login().upload_strength_workout(workout)
+        return {"workout_id": (r or {}).get("workoutId"), "raw": r}
+
     def schedule_workout(self, workout_id: int | str, day: date) -> dict[str, Any]:
         r = self._login().schedule_workout(int(workout_id), day.isoformat())
         return {"scheduled_id": (r or {}).get("id"), "raw": r}

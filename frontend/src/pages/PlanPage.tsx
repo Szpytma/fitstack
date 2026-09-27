@@ -26,6 +26,7 @@ import type {
 } from "@/api/types";
 import { PlanTable } from "@/components/PlanTable";
 import { RollingPlanCard, StartRollingButton } from "@/components/RollingPlanCard";
+import { StrengthCard } from "@/components/StrengthCard";
 import { adjustedSession, hasAnyAdjust, NO_ADJUST, type PlanAdjust } from "@/lib/planAdjust";
 
 /** Shown while the backend has not answered yet, and if it never does. The
@@ -768,6 +769,8 @@ export function PlanPage() {
       </header>
 
       <RollingPlanCard />
+
+      <StrengthCard />
 
       <PlanBuilder />
 
