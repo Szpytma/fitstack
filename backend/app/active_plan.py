@@ -61,6 +61,10 @@ class ActivePlan:
     mode: str = "race"
     weeks: int = 12
     weekly_minutes: float | None = None
+    #: Gym days, as weekday names. None means no strength block. Deliberately
+    #: part of the *same* anchor as the running plan rather than a second state
+    #: file: the two must share a start date or they drift apart within weeks.
+    strength_days: list[str] | None = None
     #: The block exactly as generated on day one. Replay reproduces it, but only
     #: while the planner is unchanged — keeping it makes "what did this plan
     #: originally say" answerable, and survives a planner tweak mid-block.
@@ -100,6 +104,7 @@ class ActivePlan:
             mode=d.get("mode") or "race",
             weeks=int(d.get("weeks") or 12),
             weekly_minutes=d.get("weekly_minutes"),
+            strength_days=d.get("strength_days"),
             original=d.get("original"),
         )
 
@@ -372,8 +377,8 @@ def compliance(
     if prev is None:
         return None
     end = date.fromisoformat(prev["end"])
-    if end >= today:
-        return None  # still in progress — nothing to judge yet
+    if end > today:
+        return None  # still to come — nothing to judge yet
 
     planned = float(prev["planned_km"])
     actual_km, runs = _runs_between(

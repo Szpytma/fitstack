@@ -99,3 +99,7 @@ class FitnessProvider(ABC):
     def push_workout_to_device(
         self, workout_id: int | str, device_id: int | str | None = None
     ) -> dict[str, Any]: ...
+
+    def create_strength_workout(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """spec = {name, exercises: [{exercise_name, sets, reps, rest_s, weight_kg?}]}."""
+        raise NotImplementedError

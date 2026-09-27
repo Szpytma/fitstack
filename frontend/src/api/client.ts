@@ -9,6 +9,9 @@ import type {
   PlanRequest,
   PlanStatus,
   PlanWeekView,
+  StrengthApplyResult,
+  StrengthWeekView,
+  StrengthWorkoutSpec,
   RacePlan,
   RunningWorkoutSpec,
   SleepSummary,
@@ -159,6 +162,19 @@ export const api = {
     http.get<PlanStatus | null>("/plan/status").then((r) => r.data),
   planEnd: () =>
     http.delete<{ cleared: boolean }>("/plan/active").then((r) => r.data),
+
+  // Strength shares the running plan's anchor, so it has no start/stop of its
+  // own — only the days it sits on.
+  strengthWeek: (offset = 0) =>
+    http.get<StrengthWeekView>("/strength/week", { params: { offset } }).then((r) => r.data),
+  strengthEnable: (days: string[]) =>
+    http.post<StrengthWeekView>("/strength/enable", { days }).then((r) => r.data),
+  strengthDisable: () =>
+    http.delete<{ cleared: boolean }>("/strength/").then((r) => r.data),
+  strengthApply: (sessions: { date: string; spec: StrengthWorkoutSpec }[]) =>
+    http
+      .post<StrengthApplyResult>("/strength/apply", { sessions })
+      .then((r) => r.data),
   planApply: (sessions: { date: string; spec: RunningWorkoutSpec }[]) =>
     http
       .post<PlanApplyResult>("/plan/apply", { sessions })

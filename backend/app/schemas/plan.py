@@ -31,6 +31,10 @@ class PlanRequest(BaseModel):
     weekly_minutes: float | None = Field(None, ge=0, le=1200)
     race_km: float = Field(0, ge=0, le=200)
     race_date: date | None = None
+    #: Backdate the block's anchor. A plan re-based mid-way must keep the weeks
+    #: already run inside it — drop them and the week numbering lies and the
+    #: adaptation rules lose the history they judge against.
+    start_date: date | None = None
     runs_per_week: int = Field(4, ge=2, le=7)
     long_run_day: str = "Sunday"
     weekly_km: float | None = Field(None, ge=0, le=300)

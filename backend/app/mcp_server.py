@@ -18,6 +18,7 @@ from mcp.server import MCPServer
 from app import active_plan, history
 from app.config import settings
 from app.planner import PlanInput, build_plan
+from app.strength_plan import StrengthInput, build_strength_plan
 from app.providers.garmin import GarminProvider
 from app.schemas.plan import parse_goal_time
 
@@ -361,6 +362,75 @@ def end_training_plan() -> dict[str, Any]:
     return {"cleared": active_plan.clear()}
 
 
+# ---------- Strength block ----------
+#
+# Gym work placed on the running days on purpose, so rest days stay rest days.
+# Reads and local state only; the actual Garmin write goes through
+# create_strength_workout + schedule_workout with the usual confirmation.
+
+
+@mcp.tool()
+def get_strength_week(week_offset: int = 0) -> dict[str, Any]:
+    """The upcoming week of the strength block attached to the running plan.
+
+    Three sessions a week on the athlete's running days — lifting in the evening,
+    running in the morning, so the rest days stay genuinely restful. The long-run
+    day carries **no loaded leg work**: squats on the evening of the week's longest
+    run buy soreness that costs the next two runs and return nothing.
+
+    Sets and reps progress in four-week blocks whose down weeks line up with the
+    running plan's. Weights are never prescribed — the athlete's working loads are
+    theirs to know, and each session's `spec` is ready for create_strength_workout.
+
+    Args:
+        week_offset: Weeks from the upcoming one. 0 = next week.
+    """
+    plan = active_plan.require()
+    if not plan.strength_days:
+        raise RuntimeError(
+            "No strength block attached to the running plan. Attach one by setting "
+            "the gym days first."
+        )
+    full = build_strength_plan(
+        StrengthInput(
+            weeks=plan.weeks,
+            days=plan.strength_days,
+            long_run_day=plan.long_run_day,
+            start_date=plan.start_date,
+            plan_name=f"{plan.race_name or 'Plan'} — strength",
+        )
+    )
+    target = active_plan.upcoming_week_start(offset=week_offset).isoformat()
+    week = next((w for w in full["weeks"] if w["start"] == target), None)
+    if week is None:
+        raise RuntimeError(f"No strength week starts on {target}.")
+    return {
+        "plan_name": full["plan_name"],
+        "week_number": week["index"],
+        "weeks_total": full["weeks_total"],
+        "days": full["days"],
+        "notes": full["notes"],
+        "week": week,
+    }
+
+
+@mcp.tool()
+def set_strength_days(days: list[str]) -> dict[str, Any]:
+    """Attach (or move) the strength block to these weekday names.
+
+    Shares the running plan's start date and length by design, so the two blocks
+    cannot drift apart. Pass the days the athlete already runs unless they say
+    otherwise. Writes nothing to Garmin.
+
+    Args:
+        days: Weekday names, e.g. ["Wednesday", "Friday", "Sunday"].
+    """
+    plan = active_plan.require()
+    plan.strength_days = list(days)
+    active_plan.save(plan)
+    return {"strength_days": plan.strength_days, "weeks": plan.weeks}
+
+
 # ---------- WRITE tools (confirm with the user before calling) ----------
 
 @mcp.tool()
@@ -402,6 +472,33 @@ def update_running_workout(workout_id: int, spec: dict[str, Any]) -> dict[str, A
     """
     _require_auth()
     return _provider.update_running_workout(workout_id, spec)
+
+
+@mcp.tool()
+def create_strength_workout(spec: dict[str, Any]) -> dict[str, Any]:
+    """Create a strength training workout in Garmin Connect.
+
+    spec = {
+        "name": str,
+        "estimated_duration_s": int | None,
+        "exercises": [
+            {"exercise_name": "Barbell Back Squat", "sets": 4, "reps": 8,
+             "rest_s": 150, "weight_kg": 60.0 | None},
+            ...
+        ],
+    }
+
+    `exercise_name` is a Garmin catalogue display name — the category is resolved
+    from it, and an unknown name is rejected rather than uploaded, because a bad
+    one saves cleanly and then shows as a blank exercise on the watch. Each
+    exercise becomes one "N Sets" block so the watch counts sets and rests.
+
+    Schedule it afterwards with schedule_workout. Use one workout per date, never
+    the same one on two days: completing it drops the template from the device
+    along with every other date that shares it.
+    """
+    _require_auth()
+    return _provider.create_strength_workout(spec)
 
 
 @mcp.tool()

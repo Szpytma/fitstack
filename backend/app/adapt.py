@@ -214,8 +214,8 @@ def completed_weeks(
         n = int(w["index"])
         if n >= before_week:
             continue
-        if date.fromisoformat(w["end"]) >= today:
-            continue  # still running — not evidence yet
+        if date.fromisoformat(w["end"]) > today:
+            continue  # still to come — not evidence yet
         out.append(report_week(w, activities, max_hr))
         if len(out) >= limit:
             break
