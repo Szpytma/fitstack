@@ -200,3 +200,75 @@ def test_a_week_ending_today_counts_as_finished():
         plan, before_week=2, activities=[], max_hr=211, today=date(2026, 9, 27)
     )
     assert [w.week_number for w in on_the_sunday] == [1]
+
+
+def test_base_mode_compliance_is_judged_in_minutes_not_kilometres():
+    """Base mode prescribes minutes. Judging it in km lets a fast run inflate
+    the week — a parkrun covers far more ground per minute than easy running,
+    and two of them would read as overreaching and hold the plan back."""
+    from datetime import date
+
+    from app import adapt
+
+    week = {
+        "index": 1,
+        "start": "2026-09-28",
+        "end": "2026-10-04",
+        "planned_km": 24.6,
+        "planned_minutes": 218,
+        "sessions": [{}, {}, {}, {}],
+    }
+    easy = [
+        {
+            "type": "running",
+            "start_local": f"2026-09-{d} 07:00",
+            "distance_m": 5600,
+            "duration_s": 47 * 60,
+            "avg_hr": 145,
+            "avg_speed_mps": 1.99,
+        }
+        for d in ("28", "30")
+    ]
+    parkrun = [
+        {
+            "type": "running",
+            "start_local": "2026-10-03 09:00",
+            "distance_m": 5140,
+            "duration_s": 28 * 60,
+            "avg_hr": 195,
+            "avg_speed_mps": 3.06,
+        }
+    ]
+    report = adapt.report_week(week, easy + parkrun, max_hr=211)
+
+    assert report.unit == "min"
+    # 122 min of 218 in minutes, but 16.3 km of 24.6 in km — the parkrun skews
+    # the kilometre reading upward relative to the time it actually took.
+    assert report.actual_minutes == 122
+    assert report.ratio == round(122 / 218, 2)
+    assert report.ratio != round(report.actual_km / report.planned_km, 2)
+
+
+def test_race_mode_still_judged_in_kilometres():
+    from app import adapt
+
+    week = {
+        "index": 1,
+        "start": "2026-09-28",
+        "end": "2026-10-04",
+        "planned_km": 30.0,
+        "sessions": [{}],
+    }
+    runs = [
+        {
+            "type": "running",
+            "start_local": "2026-09-29 07:00",
+            "distance_m": 15000,
+            "duration_s": 90 * 60,
+            "avg_hr": 150,
+            "avg_speed_mps": 2.78,
+        }
+    ]
+    report = adapt.report_week(week, runs, max_hr=211)
+    assert report.unit == "km"
+    assert report.ratio == 0.5
