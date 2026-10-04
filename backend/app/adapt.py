@@ -65,13 +65,25 @@ class WeekReport:
     end: date
     planned_km: float
     actual_km: float = 0.0
+    #: Base mode prescribes minutes, so compliance is judged in minutes there.
+    #: Judging it in kilometres lets a fast run inflate the week: a parkrun
+    #: covers far more ground per minute than easy running, and a couple of them
+    #: would read as overreaching and hold the plan back for training well.
+    planned_minutes: float | None = None
+    actual_minutes: float = 0.0
     runs_done: int = 0
     runs_planned: int = 0
     ef_median: float | None = None
     ef_samples: int = 0
 
     @property
+    def unit(self) -> str:
+        return "min" if self.planned_minutes else "km"
+
+    @property
     def ratio(self) -> float | None:
+        if self.planned_minutes:
+            return round(self.actual_minutes / self.planned_minutes, 2)
         return round(self.actual_km / self.planned_km, 2) if self.planned_km else None
 
     def as_json(self) -> dict[str, Any]:
@@ -81,6 +93,11 @@ class WeekReport:
             "end": self.end.isoformat(),
             "planned_km": round(self.planned_km, 1),
             "actual_km": round(self.actual_km, 1),
+            "planned_minutes": (
+                round(self.planned_minutes) if self.planned_minutes else None
+            ),
+            "actual_minutes": round(self.actual_minutes),
+            "unit": self.unit,
             "ratio": self.ratio,
             "runs_done": self.runs_done,
             "runs_planned": self.runs_planned,
@@ -186,13 +203,17 @@ def report_week(
         and "run" in (a.get("type") or "").lower()
     ]
     km = sum(float(a["distance_m"]) / 1000.0 for a in inside if a.get("distance_m"))
+    mins = sum(float(a["duration_s"]) / 60.0 for a in inside if a.get("duration_s"))
     ef, n = _ef_median(inside, max_hr)
+    planned_min = week.get("planned_minutes")
     return WeekReport(
         week_number=int(week["index"]),
         start=start,
         end=end,
         planned_km=float(week["planned_km"]),
         actual_km=round(km, 1),
+        planned_minutes=float(planned_min) if planned_min else None,
+        actual_minutes=round(mins, 1),
         runs_done=len(inside),
         runs_planned=len(week.get("sessions") or []),
         ef_median=ef,
@@ -297,7 +318,13 @@ def decide(
         d.reasons.append(
             f"{CONSECUTIVE} weeks running below {int(SHORT_WEEK * 100)}% of plan ("
             + ", ".join(
-                f"week {r.week_number}: {r.actual_km:g}/{r.planned_km:g} km" for r in window
+                f"week {r.week_number}: "
+                + (
+                    f"{r.actual_minutes:g}/{r.planned_minutes:g} min"
+                    if r.planned_minutes
+                    else f"{r.actual_km:g}/{r.planned_km:g} km"
+                )
+                for r in window
             )
             + ") — holding volume instead of climbing."
         )
