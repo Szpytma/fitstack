@@ -320,6 +320,20 @@ threshold workout with warmup and cooldown can out-distance it.
   `_HR_BANDS` ratio cut-points are calibrated against the planner's own emitted
   pace bands (recovery ≈0.69 of threshold speed, long 0.74, easy 0.76, threshold
   0.98, interval 1.07); guess them and every aerobic session collapses into one band.
+- **Which sensor measured HR lives in `metadataDTO.sensors`, not `deviceId`.** An
+  activity's `deviceId` is the watch that *recorded the file* — a paired chest
+  strap never appears there, because it does not create the activity. So
+  `deviceId` says nothing about where the HR series came from, and reading it as
+  the HR source is how you end up dismissing strap-measured data as wrist
+  optical. `GET /activity-service/activity/{id}` returns
+  `metadataDTO.sensors` — a list carrying each paired sensor's `serialNumber`
+  (matches `list_devices()`), `bleDeviceType` and battery state, or `None` when
+  the watch's own optical sensor was the only source. The `/sensors` sub-path
+  404s; it is a field on the activity, not an endpoint. Worth the trouble
+  because the two sources disagree where it matters: on this account wrist
+  optical peaked at 216 bpm across 53 runs while the chest strap peaked at 212
+  across 36 — optical overshoots by a few beats at near-maximal intensity,
+  which is exactly the region a configured max HR is set from.
 - **A rolling plan cannot be stateless.** Regenerating a week with
   `start_date = today` looks right and is silently broken: `total_weeks` shrinks by
   one each week, so `phase_for(0, total, taper)` returns `"base"` forever and
