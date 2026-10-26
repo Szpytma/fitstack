@@ -320,20 +320,25 @@ threshold workout with warmup and cooldown can out-distance it.
   `_HR_BANDS` ratio cut-points are calibrated against the planner's own emitted
   pace bands (recovery ≈0.69 of threshold speed, long 0.74, easy 0.76, threshold
   0.98, interval 1.07); guess them and every aerobic session collapses into one band.
-- **Which sensor measured HR lives in `metadataDTO.sensors`, not `deviceId`.** An
-  activity's `deviceId` is the watch that *recorded the file* — a paired chest
-  strap never appears there, because it does not create the activity. So
-  `deviceId` says nothing about where the HR series came from, and reading it as
-  the HR source is how you end up dismissing strap-measured data as wrist
-  optical. `GET /activity-service/activity/{id}` returns
-  `metadataDTO.sensors` — a list carrying each paired sensor's `serialNumber`
-  (matches `list_devices()`), `bleDeviceType` and battery state, or `None` when
-  the watch's own optical sensor was the only source. The `/sensors` sub-path
-  404s; it is a field on the activity, not an endpoint. Worth the trouble
-  because the two sources disagree where it matters: on this account wrist
-  optical peaked at 216 bpm across 53 runs while the chest strap peaked at 212
-  across 36 — optical overshoots by a few beats at near-maximal intensity,
-  which is exactly the region a configured max HR is set from.
+- **`metadataDTO.sensors` lists what was *paired*, not what measured.** An
+  activity's `deviceId` is only the watch that recorded the file, so it never
+  names a chest strap; `GET /activity-service/activity/{id}` returns
+  `metadataDTO.sensors`, a list carrying each associated sensor's
+  `serialNumber` (matches `list_devices()`), `bleDeviceType` and battery state,
+  or `None` when none was associated. The `/sensors` sub-path 404s; it is a
+  field on the activity, not an endpoint.
+  **Do not read it as the source of the HR series.** An account has been seen
+  with the strap listed, `batteryStatus: OK`, while the athlete reports the
+  strap never connected and the watch recorded through a sleeve — the field
+  reflects pairing, not delivery, and Garmin exposes no per-sample source.
+  Two attempts to tell the sources apart from the series failed: sample-to-sample
+  jitter is flattened by the chart API to 0.5-1.6 bpm on every run, and
+  speed/HR correlation is dominated by cardiac drift (negative on clean easy
+  runs, so a positive value proves nothing). **Ask the athlete** — what they
+  wore is better evidence than anything in the payload. This matters because a
+  wrist sensor with no skin contact can read 40-50 bpm low while the athlete
+  paces off it: one easy run was logged at HR 90-124 while actually being run
+  at 5K race pace.
 - **A rolling plan cannot be stateless.** Regenerating a week with
   `start_date = today` looks right and is silently broken: `total_weeks` shrinks by
   one each week, so `phase_for(0, total, taper)` returns `"base"` forever and
