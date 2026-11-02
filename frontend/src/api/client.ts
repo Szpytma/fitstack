@@ -15,7 +15,10 @@ import type {
   RacePlan,
   RunningWorkoutSpec,
   SleepSummary,
+  StatsOverview,
+  StatsWeek,
   UpcomingWorkout,
+  WeightHistory,
   WorkoutDetail,
   WorkoutSummary,
 } from "./types";
@@ -179,4 +182,16 @@ export const api = {
     http
       .post<PlanApplyResult>("/plan/apply", { sessions })
       .then((r) => r.data),
+
+  // Training metrics. `overview` stitches six Garmin endpoints together and
+  // names whatever didn't arrive in `warnings`, so it is slower than the rest
+  // and worth a longer stale time rather than a retry.
+  statsOverview: (day?: string) =>
+    http
+      .get<StatsOverview>("/stats/overview", { params: day ? { day } : undefined })
+      .then((r) => r.data),
+  statsWeight: (days = 180) =>
+    http.get<WeightHistory>("/stats/weight", { params: { days } }).then((r) => r.data),
+  statsWeeks: (weeks = 24) =>
+    http.get<StatsWeek[]>("/stats/weeks", { params: { weeks } }).then((r) => r.data),
 };

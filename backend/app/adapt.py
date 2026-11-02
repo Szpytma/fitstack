@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from app import laps
@@ -219,6 +219,56 @@ def report_week(
         ef_median=ef,
         ef_samples=n,
     )
+
+
+def week_series(
+    activities: list[dict[str, Any]],
+    max_hr: int | None,
+    since: date | None = None,
+) -> list[dict[str, Any]]:
+    """Every calendar week that holds a run, oldest first, with its EF median.
+
+    `report_week` answers "how did plan week 5 go"; this answers "what has the
+    training looked like", which is a different question — it spans the weeks
+    before the block started, and it has no opinion about what was planned.
+    Weeks with no runs are absent rather than zero: a gap in training is not a
+    week of zero volume, and drawing it as one implies a measurement nobody took.
+
+    **Do not compare EF across training eras.** It rises with intensity inside
+    the aerobic window, so short efforts at the top of the band post a higher
+    number than genuinely easy running — this account reads 0.95-1.0 for
+    2025's 5K efforts and 0.78-0.86 for the base block, and the earlier figure
+    is not the better fitness. `since` is how a caller keeps one era in frame.
+    """
+    weeks: dict[date, list[dict[str, Any]]] = {}
+    for a in activities:
+        if "run" not in (a.get("type") or "").lower():
+            continue
+        d = _day_of(a)
+        if d is None or (since is not None and d < since):
+            continue
+        weeks.setdefault(d - timedelta(days=d.weekday()), []).append(a)
+
+    out: list[dict[str, Any]] = []
+    for start in sorted(weeks):
+        inside = weeks[start]
+        ef, n = _ef_median(inside, max_hr)
+        out.append(
+            {
+                "week_start": start.isoformat(),
+                "week_end": (start + timedelta(days=6)).isoformat(),
+                "actual_minutes": round(
+                    sum(float(a["duration_s"]) / 60.0 for a in inside if a.get("duration_s"))
+                ),
+                "km": round(
+                    sum(float(a["distance_m"]) / 1000.0 for a in inside if a.get("distance_m")), 1
+                ),
+                "runs": len(inside),
+                "ef_median": ef,
+                "ef_runs": n,
+            }
+        )
+    return out
 
 
 def completed_weeks(

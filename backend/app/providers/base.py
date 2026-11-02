@@ -71,6 +71,59 @@ class FitnessProvider(ABC):
         Providers without a zone concept return None rather than raising.
         """
 
+    # ---------- training metrics ----------
+    # Garmin's own read of where the athlete is: a handful of single-day
+    # figures that no amount of activity history reproduces, because the watch
+    # computes them from data the API does not expose per sample. Each one is a
+    # separate concept rather than a single fat call, so a provider can serve
+    # the ones it has. Defaults raise, like `create_strength_workout`, so a
+    # provider without the concept needs no stub.
+
+    def athlete_profile(self) -> dict[str, Any]:
+        """{height_cm, weight_kg, birth_date, gender} as the account records them.
+
+        Height is here because body-mass targets are meaningless without it,
+        and guessing it from a reported BMI is a loop: the BMI came from the
+        height. Read it, don't derive it.
+        """
+        raise NotImplementedError
+
+    def training_status(self, day: date) -> dict[str, Any]:
+        """{vo2max, status, feedback, acute_load, chronic_load, acwr, acwr_status,
+        balance_feedback, load_balance: [{bucket, load, target_min, target_max}]}.
+        """
+        raise NotImplementedError
+
+    def hrv(self, day: date) -> dict[str, Any]:
+        """{weekly_avg, last_night, status, feedback, baseline_low_upper,
+        baseline_balanced_low, baseline_balanced_high} in milliseconds.
+        """
+        raise NotImplementedError
+
+    def training_readiness(self, day: date) -> dict[str, Any]:
+        """{score, level, feedback, measured_at, context, factors: [{factor, percent, feedback}]}.
+
+        One reading, not the day's history: see the provider for which.
+        """
+        raise NotImplementedError
+
+    def fitness_age(self, day: date) -> dict[str, Any]:
+        """{chronological, fitness, achievable, components: [{name, value, target_value,
+        improvement_value, potential_age, priority}]}.
+        """
+        raise NotImplementedError
+
+    def race_predictions(self) -> dict[str, Any]:
+        """{time_5k_s, time_10k_s, time_half_s, time_marathon_s} in seconds."""
+        raise NotImplementedError
+
+    def weight_history(self, start: date, end: date) -> list[dict[str, Any]]:
+        """[{day, weight_kg}] — one entry per day that has a weigh-in, ascending.
+
+        Gaps are the norm: these are manual weigh-ins, not a continuous series.
+        """
+        raise NotImplementedError
+
     # ---------- write (Garmin only; Strava will raise NotImplementedError) ----------
     @abstractmethod
     def create_running_workout(self, spec: dict[str, Any]) -> dict[str, Any]:

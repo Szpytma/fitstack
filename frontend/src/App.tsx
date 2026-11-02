@@ -7,6 +7,7 @@ import { ActivityDetailPage } from "@/pages/ActivityDetailPage";
 import { CoachPage } from "@/pages/CoachPage";
 import { PlanPage } from "@/pages/PlanPage";
 import { SleepPage } from "@/pages/SleepPage";
+import { StatsPage } from "@/pages/StatsPage";
 import { WorkoutsPage } from "@/pages/WorkoutsPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { useQuery } from "@tanstack/react-query";
@@ -93,6 +94,7 @@ function AuthedApp({ user }: { user: FitStackUser }) {
             {(params) => <ActivityDetailPage id={Number(params.id)} />}
           </Route>
           <Route path="/sleep" component={SleepPage} />
+          <Route path="/stats" component={StatsPage} />
           <Route path="/coach" component={CoachPage} />
           <Route path="/workouts" component={WorkoutsPage} />
           <Route path="/plan" component={PlanPage} />

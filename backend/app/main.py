@@ -15,6 +15,7 @@ from app.routers import (
     devices,
     health,
     plan,
+    stats,
     strength,
     workouts,
 )
@@ -91,6 +92,7 @@ for _router in (
     workouts.router,
     devices.router,
     plan.router,
+    stats.router,
     strength.router,
 ):
     app.include_router(_router, dependencies=[AuthDep])
