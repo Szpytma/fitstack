@@ -312,7 +312,9 @@ def start_training_plan(
     week_start = min(first_start, active_plan.upcoming_week_start(today))
     if active_plan.select_week(full, week_start) is None:
         week_start = first_start
-    return active_plan.week_view(plan, full, week_start, activities)
+    return active_plan.week_view(
+        plan, full, week_start, activities, (hr_zones or {}).get("max_hr")
+    )
 
 
 @mcp.tool()

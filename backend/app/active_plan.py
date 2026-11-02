@@ -264,7 +264,9 @@ def lead_in_view(
         activities,
         hr_zones,
     )
-    view = week_view(plan, base, week_start, activities)
+    view = week_view(
+        plan, base, week_start, activities, (hr_zones or {}).get("max_hr")
+    )
     # week_view reads the race from the plan it was handed, which here is the
     # base block. The race is still the point of the lead-in, so say so.
     view["race_name"] = plan.race_name
@@ -318,7 +320,7 @@ def adapted_view(
     )
     adjusted = rebuild(plan, activities, hr_zones, scales) if scales else original
 
-    view = week_view(plan, adjusted, week_start, activities)
+    view = week_view(plan, adjusted, week_start, activities, max_hr)
     view["decision"] = decision.as_json() if decision else None
     view["original_planned_km"] = round(float(target["planned_km"]), 1)
     return view
@@ -333,39 +335,22 @@ def select_week(full_plan: dict[str, Any], week_start: date) -> dict[str, Any] |
     return None
 
 
-def _runs_between(
-    activities: list[dict[str, Any]] | None, start: date, end: date
-) -> tuple[float, int]:
-    """Total km and number of runs actually recorded in [start, end]."""
-    km, n = 0.0, 0
-    for a in activities or []:
-        if "run" not in (a.get("type") or "").lower():
-            continue
-        try:
-            day = date.fromisoformat(str(a.get("start_local") or "")[:10])
-        except ValueError:
-            continue
-        if not start <= day <= end:
-            continue
-        dist = a.get("distance_m")
-        if dist is None:
-            continue
-        km += float(dist) / 1000.0
-        n += 1
-    return round(km, 1), n
-
-
 def compliance(
     full_plan: dict[str, Any],
     week_number: int,
     activities: list[dict[str, Any]] | None,
     today: date | None = None,
+    max_hr: int | None = None,
 ) -> dict[str, Any] | None:
     """How the *previous* week actually went, against what it asked for.
 
     Reported, not acted on: the volume ramp stays anchored either way. Whether a
     missed week should hold the progression is a coaching decision, not something
     to infer silently — see the `ratio` and decide.
+
+    Judged in the unit the plan prescribes — minutes for a base block, kilometres
+    for a race one — because that is the unit `adapt.decide` uses, and a card
+    that disagrees with the engine is worse than no card.
 
     None while that week is still running, or before there is a previous week.
     """
@@ -376,24 +361,18 @@ def compliance(
     )
     if prev is None:
         return None
-    end = date.fromisoformat(prev["end"])
-    if end > today:
+    if date.fromisoformat(prev["end"]) > today:
         return None  # still to come — nothing to judge yet
 
-    planned = float(prev["planned_km"])
-    actual_km, runs = _runs_between(
-        activities, date.fromisoformat(prev["start"]), end
-    )
-    return {
-        "week_number": int(prev["index"]),
-        "start": prev["start"],
-        "end": prev["end"],
-        "planned_km": round(planned, 1),
-        "actual_km": actual_km,
-        "ratio": round(actual_km / planned, 2) if planned else None,
-        "runs_done": runs,
-        "runs_planned": len(prev.get("sessions") or []),
-    }
+    # `adapt.report_week` already owns the unit question, and it is the same
+    # function the adaptation rules are judged by. Rolling our own km-only
+    # version here is how the card came to disagree with the engine: in base
+    # mode the prescription is minutes, so a week run slower than planned reads
+    # as *over* target in kilometres while the engine sees a shortfall.
+    report = adapt.report_week(prev, activities or [], max_hr)
+    out = report.as_json()
+    out["runs_planned"] = len(prev.get("sessions") or [])
+    return out
 
 
 def week_view(
@@ -401,6 +380,7 @@ def week_view(
     full_plan: dict[str, Any],
     week_start: date,
     activities: list[dict[str, Any]] | None = None,
+    max_hr: int | None = None,
 ) -> dict[str, Any]:
     """One week, wrapped with the context needed to act on it.
 
@@ -435,7 +415,7 @@ def week_view(
         "basis": full_plan.get("basis"),
         "hr_basis": full_plan.get("hr_basis"),
         "warnings": full_plan.get("warnings") or [],
-        "last_week": compliance(full_plan, number, activities),
+        "last_week": compliance(full_plan, number, activities, max_hr=max_hr),
         "week": week,
     }
 

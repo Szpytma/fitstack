@@ -143,6 +143,11 @@ class PlanCompliance(BaseModel):
     """What the previous week actually delivered, against what it asked for.
 
     Reported, never acted on — the volume ramp stays anchored either way.
+
+    Both units travel, and `unit` says which one `ratio` is in: a base block
+    prescribes minutes, a race block kilometres. Read `ratio` against `unit`,
+    never against `actual_km` — at a fixed heart rate a slow week covers less
+    ground while hitting its minutes exactly, so the two disagree by design.
     """
 
     week_number: int
@@ -150,9 +155,17 @@ class PlanCompliance(BaseModel):
     end: str
     planned_km: float
     actual_km: float
+    planned_minutes: float | None = None
+    actual_minutes: float | None = None
+    #: "min" for a base block, "km" for a race one — the unit `ratio` is in.
+    unit: str = "km"
     ratio: float | None = None
     runs_done: int
     runs_planned: int
+    #: Efficiency factor for the week, and how many runs it rests on. The base
+    #: block's actual progress measure, so it rides along with the volume.
+    ef_median: float | None = None
+    ef_samples: int = 0
 
 
 class PlanDecision(BaseModel):

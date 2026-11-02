@@ -306,9 +306,17 @@ export interface PlanCompliance {
   end: string;
   planned_km: number;
   actual_km: number;
+  planned_minutes?: number | null;
+  actual_minutes?: number | null;
+  /** The unit `ratio` is in: "min" for a base block, "km" for a race one.
+   *  Read `ratio` against this, never against `actual_km` — at a fixed heart
+   *  rate a slow week hits its minutes while covering less ground. */
+  unit: "min" | "km";
   ratio?: number | null;
   runs_done: number;
   runs_planned: number;
+  ef_median?: number | null;
+  ef_samples?: number;
 }
 
 /** Why the upcoming week advances, holds, or steps back. Deterministic — the

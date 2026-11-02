@@ -238,6 +238,15 @@ week in place keeps the taper where it belongs.
 `last_week` reports the raw numbers alongside the decision, so a week that fell short
 without triggering a rule still says so.
 
+**Compliance is judged in the unit the plan prescribes**, and there is exactly one
+place that decides which: `adapt.report_week`. `active_plan.compliance` delegates to
+it rather than counting kilometres itself, which is what it used to do — so a base
+week run slower than planned showed as *over* target on the `/plan` card while the
+engine saw a shortfall. At a fixed heart rate distance is an outcome, so the two
+units disagree by design, and the athlete was being shown the one the engine
+ignores. `PlanCompliance.unit` carries the answer to the UI; read `ratio` against
+it, never against `actual_km`.
+
 `build_plan` needed no changes for any of this — it already anchors weeks *backwards*
 from the race date, so replaying it with the original `start_date` reproduces the
 same calendar weeks with the same phases.
