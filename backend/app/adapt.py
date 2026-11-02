@@ -158,6 +158,17 @@ def efficiency_factor(activity: dict[str, Any], max_hr: int | None) -> float | N
         share = float(hr) / max_hr
         if not AEROBIC_LO <= share <= AEROBIC_HI:
             return None
+
+    # Deliberately the whole-activity figure, never a per-lap one. Measuring
+    # only the steady kilometres is more faithful to a single run, and was
+    # tried: it cannot be done safely here, because `decide` compares this
+    # against `ef_baseline` — the four weeks *before* the block — and
+    # `history.attach_laps` reaches 8 runs within 56 days, so the baseline can
+    # never be lapped however the limits are tuned. That leaves a lap-aware
+    # numerator over a whole-activity denominator, a ~4% methodology gap against
+    # a 5% rule, and an EF that changes for a *past* week every time a new run
+    # pushes an old one out of the lapped set. Same inputs, different answer
+    # later, which this module exists not to do.
     return round((float(mps) * 60.0) / float(hr), 3)
 
 

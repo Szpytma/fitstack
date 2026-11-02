@@ -13,6 +13,62 @@ from garminconnect import (
 
 from app.providers.base import FitnessProvider
 
+#: Above this, a temperature reading cannot be Celsius for real-world weather,
+#: so the payload must be Fahrenheit. Deliberately well clear of the hottest
+#: inhabited places: the cost of guessing Celsius wrongly is a nonsense figure
+#: on the page, and the cost of guessing Fahrenheit wrongly is the same.
+PLAUSIBLE_MAX_CELSIUS = 45.0
+
+
+def weather_temps_celsius(
+    weather: dict[str, Any],
+) -> tuple[float | None, float | None]:
+    """`(temp_c, apparent_c)` with the account's unit inferred once per reading.
+
+    Garmin reports temperature in whatever unit the account is set to and names
+    no unit anywhere in the payload, so it has to be inferred. The inference has
+    to be made **once for the whole reading**, never per field: the unit is a
+    single account-level setting, so a reading is wholly Fahrenheit or wholly
+    Celsius.
+
+    Deciding per value splits one reading across both scales as soon as one
+    field crosses the threshold and another does not, which is how this was
+    found — 46F/43F/43F came back as 7.8 C beside a literal 43 C "feels like",
+    on a 7 C London morning.
+
+    **Only `temp` votes**, with `apparentTemp` as a fallback when `temp` is
+    absent. Two fields that look like evidence are not:
+
+    * `dewPoint` carries none. Dew point is never above air temperature, so a
+      Fahrenheit `dewPoint` over the threshold implies `temp` is over it too and
+      `temp` has already decided. All it can do is harm — a sentinel or a bogus
+      value on an otherwise Celsius reading would convert a correct 18 C into
+      -7.8 C.
+    * `apparentTemp` is a heat index, and on a hot humid day a genuinely Celsius
+      account reports a feels-like above the threshold with the air temperature
+      below it (38 C air, ~50 C apparent). Letting it vote would convert the
+      whole reading and turn that 38 C into 3 C.
+
+    Residual limit: a genuinely cold Fahrenheit reading whose `temp` sits below
+    the threshold is indistinguishable from Celsius and stays unconverted. Only
+    the account's own unit setting could settle that, and it is not in this
+    payload.
+    """
+    # `temp` alone, because it is the only field that is unambiguously the air
+    # temperature; apparent temperature is a heat index and can exceed the
+    # threshold in Celsius. See the docstring for why dew point is not read.
+    deciding = weather.get("temp")
+    if deciding is None:
+        deciding = weather.get("apparentTemp")
+    fahrenheit = deciding is not None and float(deciding) > PLAUSIBLE_MAX_CELSIUS
+
+    def to_c(v: float | None) -> float | None:
+        if v is None:
+            return None
+        return (float(v) - 32) * 5 / 9 if fahrenheit else float(v)
+
+    return to_c(weather.get("temp")), to_c(weather.get("apparentTemp"))
+
 logger = logging.getLogger(__name__)
 
 
@@ -265,16 +321,10 @@ class GarminProvider(FitnessProvider):
 
         weather_out: dict[str, Any] = {}
         if weather:
-            def to_c(v: float | None) -> float | None:
-                # Garmin returns temp in the user's account unit (F or C).
-                # Heuristic: values > 45 must be Fahrenheit for real-world weather.
-                if v is None:
-                    return None
-                return (v - 32) * 5 / 9 if v > 45 else v
-
+            temp_c, apparent_c = weather_temps_celsius(weather)
             weather_out = {
-                "temp_c": to_c(weather.get("temp")),
-                "apparent_c": to_c(weather.get("apparentTemp")),
+                "temp_c": temp_c,
+                "apparent_c": apparent_c,
                 "humidity": weather.get("relativeHumidity"),
                 "wind_kph": weather.get("windSpeed"),
                 "conditions": (weather.get("weatherTypeDTO") or {}).get("desc"),
