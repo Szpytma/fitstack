@@ -217,6 +217,25 @@ count (60-85% of max HR — a 5K time trial posts a high EF and means nothing he
 week is its *median*, and the comparison is against a baseline median from before the
 plan, never the week before.
 
+**EF is the whole-activity figure, and must stay that way.** Measuring only the
+steady kilometres — dropping an easy run's strides and their jog-backs, as
+`laps.steady_laps` once did — is more faithful to any single run, and was tried
+and reverted. `decide` compares the week against `ef_baseline`, the four weeks
+*before* the block, and `history.attach_laps` reaches 8 runs within 56 days, so
+the baseline can never be lapped however the limits are tuned. That leaves a
+lap-aware numerator over a whole-activity denominator: a ~4% methodology gap
+against the 5% `EF_DECLINE` rule, enough to hold volume for no reason or to mask
+a real decline. It also makes a *past* week's EF move whenever a new run pushes
+an old one out of the lapped set, so "why was week 5 lighter?" stops having one
+answer. If this is ever revisited, both sides of the comparison have to be
+measured the same way first.
+
+A strides session is not the problem it looks like. Its surges do not reliably
+lift the blended figure: on a real one the surge block read EF 0.807 against the
+easy kilometres' 0.895, because heart rate rockets through six accelerations
+while the average pace over surges *and* recoveries does not. The bias is
+small, constant week to week, and conservative.
+
 Two mechanical points that are easy to get wrong:
 
 - **A hold must never raise volume.** Levelling at the previous week lands *above*
@@ -369,8 +388,18 @@ threshold workout with warmup and cooldown can out-distance it.
 
 ## Non-obvious things
 
-- **Garmin weather temp** — comes back in the user's account unit. Heuristic in
-  `garmin.py::activity_detail`: if `temp > 45`, treat as Fahrenheit and convert.
+- **Garmin weather temp** — comes back in the account's unit, and the payload
+  names no unit anywhere. `garmin.py::weather_temps_celsius` infers it **once
+  per reading**, never per field: the unit is one account-level setting, so a
+  reading is wholly Fahrenheit or wholly Celsius. Deciding per value splits one
+  reading across both scales as soon as one field crosses the threshold and
+  another does not — `46/43/43` came back as 7.8 C beside a literal 43 C "feels
+  like", on a 7 C London morning. `dewPoint` is read as evidence only and never
+  reported; three fields are much harder to fool than one. Residual limit: a
+  cold Fahrenheit reading whose every field sits below the threshold is
+  indistinguishable from Celsius and stays unconverted.
+  **`windSpeed` has the same root cause and is not handled.** It is mapped
+  straight to `wind_kph`, so a Fahrenheit account's figure is really mph.
 - **`get_activity_details()`** returns time-series but no summary — we also call
   `get_activity()` for the summaryDTO (name, duration, HR).
 - **Coach targets** are `"no.target"` in templates because Garmin Coach pushes

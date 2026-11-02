@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app import active_plan, adapt
+from app import active_plan, adapt, history
 from app.deps import get_garmin
 from app.providers.base import FitnessProvider
 from app.schemas.stats import (
@@ -147,7 +147,27 @@ def weeks(
     Weeks before the block started simply have none.
     """
     zones = provider.heart_rate_zones() or {}
-    activities = provider.activities(limit=limit)
+    try:
+        activities = provider.activities(limit=limit)
+    except Exception as exc:
+        # The one input this endpoint cannot do without, so say so cleanly
+        # rather than letting it surface as an unhandled 500.
+        log.warning("stats/weeks: could not read activities (%s)", exc)
+        raise HTTPException(
+            status_code=502, detail=f"Could not read activities: {exc}"
+        ) from exc
+
+    # Laps for the recent runs, exactly as `/plan/week` does it, so a structured
+    # session is excluded from the efficiency factor on both pages rather than
+    # one. Costs up to `history.DEFAULT_LIMIT` extra provider round trips, which
+    # is why a failure here degrades instead of failing the request: without
+    # laps every run is read as steady, which is the old behaviour, not a
+    # broken one.
+    try:
+        history.attach_laps(provider, activities)
+    except Exception as exc:  # pragma: no cover - upstream flakiness
+        log.warning("stats/weeks: laps unavailable (%s); reading runs as steady", exc)
+
     today = date_cls.today()
     since = today - timedelta(weeks=weeks_back)
 
