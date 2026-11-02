@@ -389,7 +389,7 @@ threshold workout with warmup and cooldown can out-distance it.
 ## Non-obvious things
 
 - **Garmin weather temp** — comes back in the account's unit, and the payload
-  names no unit anywhere. `garmin.py::weather_temps_celsius` infers it **once
+  names no unit anywhere. `garmin.py::normalize_weather` infers it **once
   per reading**, never per field: the unit is one account-level setting, so a
   reading is wholly Fahrenheit or wholly Celsius. Deciding per value splits one
   reading across both scales as soon as one field crosses the threshold and
@@ -398,8 +398,12 @@ threshold workout with warmup and cooldown can out-distance it.
   reported; three fields are much harder to fool than one. Residual limit: a
   cold Fahrenheit reading whose every field sits below the threshold is
   indistinguishable from Celsius and stays unconverted.
-  **`windSpeed` has the same root cause and is not handled.** It is mapped
-  straight to `wind_kph`, so a Fahrenheit account's figure is really mph.
+  **`windSpeed` rides on the same decision**, which is why one function
+  normalises the whole reading rather than each field having its own: two
+  decisions are two chances to disagree. Garmin reports mph on an imperial
+  account and km/h on a metric one, and wind carries no evidence of its own —
+  6 and 20 are ordinary readings in either unit, so there is no threshold to
+  test. It has to follow the temperature.
 - **`get_activity_details()`** returns time-series but no summary — we also call
   `get_activity()` for the summaryDTO (name, duration, HR).
 - **Coach targets** are `"no.target"` in templates because Garmin Coach pushes
