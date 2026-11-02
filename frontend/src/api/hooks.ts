@@ -264,3 +264,29 @@ export function usePushWorkoutToDevice() {
       api.pushWorkoutToDevice(id, deviceId),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Training metrics. All three are day-grained — Garmin recomputes them
+// overnight, so refetching on an interval buys nothing.
+// ---------------------------------------------------------------------------
+
+export const useStatsOverview = (day?: string) =>
+  useQuery({
+    queryKey: ["stats-overview", day ?? "today"],
+    queryFn: () => api.statsOverview(day),
+    staleTime: 10 * 60_000,
+  });
+
+export const useWeightHistory = (days = 180) =>
+  useQuery({
+    queryKey: ["stats-weight", days],
+    queryFn: () => api.statsWeight(days),
+    staleTime: 10 * 60_000,
+  });
+
+export const useStatsWeeks = (weeks = 24) =>
+  useQuery({
+    queryKey: ["stats-weeks", weeks],
+    queryFn: () => api.statsWeeks(weeks),
+    staleTime: 10 * 60_000,
+  });

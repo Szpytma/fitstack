@@ -395,6 +395,183 @@ class GarminProvider(FitnessProvider):
             "zone_floors": [int(f) for f in floors] if all(f is not None for f in floors) else None,
         }
 
+    # ---------- TRAINING METRICS ----------
+    @staticmethod
+    def _latest_device_entry(by_device: dict[str, Any] | None) -> dict[str, Any]:
+        """Garmin keys several metrics by the device that computed them.
+
+        An account with more than one watch gets one entry per device, and the
+        one that matters is whichever has the freshest `calendarDate` — the
+        primary-training-device flag is not always set.
+        """
+        entries = [e for e in (by_device or {}).values() if isinstance(e, dict)]
+        if not entries:
+            return {}
+        return max(entries, key=lambda e: str(e.get("calendarDate") or ""))
+
+    def athlete_profile(self) -> dict[str, Any]:
+        raw = (self._login().get_user_profile() or {}).get("userData") or {}
+        weight_g = raw.get("weight")
+        return {
+            "height_cm": raw.get("height"),
+            "weight_kg": round(float(weight_g) / 1000.0, 1) if weight_g else None,
+            "birth_date": raw.get("birthDate"),
+            "gender": raw.get("gender"),
+        }
+
+    def training_status(self, day: date) -> dict[str, Any]:
+        raw = self._login().get_training_status(day.isoformat()) or {}
+        vo2 = (raw.get("mostRecentVO2Max") or {}).get("generic") or {}
+        bal = self._latest_device_entry(
+            (raw.get("mostRecentTrainingLoadBalance") or {}).get(
+                "metricsTrainingLoadBalanceDTOMap"
+            )
+        )
+        status = self._latest_device_entry(
+            (raw.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData")
+        )
+        # Acute/chronic load is nested one level down, not on the status entry.
+        acute = status.get("acuteTrainingLoadDTO") or {}
+        buckets = [
+            ("aerobic_low", "monthlyLoadAerobicLow", "monthlyLoadAerobicLowTarget"),
+            ("aerobic_high", "monthlyLoadAerobicHigh", "monthlyLoadAerobicHighTarget"),
+            ("anaerobic", "monthlyLoadAnaerobic", "monthlyLoadAnaerobicTarget"),
+        ]
+        return {
+            "date": day.isoformat(),
+            # The precise value is what the watch shows; vo2MaxValue is rounded.
+            "vo2max": vo2.get("vo2MaxPreciseValue") or vo2.get("vo2MaxValue"),
+            "vo2max_measured": vo2.get("calendarDate"),
+            # `trainingStatus` is an opaque integer code; the feedback phrase is
+            # the part that means anything, so both travel together.
+            "status": status.get("trainingStatus"),
+            "feedback": status.get("trainingStatusFeedbackPhrase"),
+            "acute_load": acute.get("dailyTrainingLoadAcute"),
+            "chronic_load": acute.get("dailyTrainingLoadChronic"),
+            "acwr": acute.get("dailyAcuteChronicWorkloadRatio"),
+            "acwr_status": acute.get("acwrStatus"),
+            "balance_feedback": bal.get("trainingBalanceFeedbackPhrase"),
+            "load_balance": [
+                {
+                    "bucket": name,
+                    "load": bal.get(load_key),
+                    "target_min": bal.get(target_key + "Min"),
+                    "target_max": bal.get(target_key + "Max"),
+                }
+                for name, load_key, target_key in buckets
+                if bal.get(load_key) is not None
+            ],
+        }
+
+    def hrv(self, day: date) -> dict[str, Any]:
+        raw = (self._login().get_hrv_data(day.isoformat()) or {}).get("hrvSummary") or {}
+        base = raw.get("baseline") or {}
+        return {
+            "date": raw.get("calendarDate") or day.isoformat(),
+            "weekly_avg": raw.get("weeklyAvg"),
+            "last_night": raw.get("lastNightAvg"),
+            "status": raw.get("status"),
+            "feedback": raw.get("feedbackPhrase"),
+            "baseline_low_upper": base.get("lowUpper"),
+            "baseline_balanced_low": base.get("balancedLow"),
+            "baseline_balanced_high": base.get("balancedUpper"),
+        }
+
+    def training_readiness(self, day: date) -> dict[str, Any]:
+        raw = self._login().get_training_readiness(day.isoformat()) or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        readings = sorted(
+            (r for r in raw if isinstance(r, dict)),
+            key=lambda r: str(r.get("timestamp") or ""),
+        )
+        if not readings:
+            return {"date": day.isoformat(), "score": None, "factors": []}
+
+        # Garmin rewrites readiness several times a day, and the score collapses
+        # right after a session: one hard run took this account from 70 to 22 with
+        # a 46-hour recovery time. That reading says the run was hard, not that the
+        # athlete is unready, so the figure worth reporting is the wake-up reset.
+        # The midnight reading is no good either — it lands before sleep is scored
+        # (`validSleep` false, no sleep score at all).
+        chosen = next(
+            (r for r in readings if r.get("inputContext") == "AFTER_WAKEUP_RESET"),
+            next((r for r in reversed(readings) if r.get("validSleep")), readings[-1]),
+        )
+        factors = [
+            ("recovery_time", "recoveryTimeFactorPercent", "recoveryTimeFactorFeedback"),
+            ("hrv", "hrvFactorPercent", "hrvFactorFeedback"),
+            ("stress_history", "stressHistoryFactorPercent", "stressHistoryFactorFeedback"),
+            ("sleep_score", "sleepScoreFactorPercent", "sleepScoreFactorFeedback"),
+            ("sleep_history", "sleepHistoryFactorPercent", "sleepHistoryFactorFeedback"),
+            ("acwr", "acwrFactorPercent", "acwrFactorFeedback"),
+        ]
+        return {
+            "date": chosen.get("calendarDate") or day.isoformat(),
+            "score": chosen.get("score"),
+            "level": chosen.get("level"),
+            "feedback": chosen.get("feedbackShort"),
+            "measured_at": chosen.get("timestampLocal") or chosen.get("timestamp"),
+            "context": chosen.get("inputContext"),
+            "sleep_score": chosen.get("sleepScore"),
+            "recovery_time_min": chosen.get("recoveryTime"),
+            "acute_load": chosen.get("acuteLoad"),
+            # The post-exercise reading still earns its place: it is how long the
+            # watch thinks today's session needs to be absorbed.
+            "latest_score": readings[-1].get("score"),
+            "latest_recovery_time_min": readings[-1].get("recoveryTime"),
+            "factors": [
+                {"factor": name, "percent": chosen.get(pct), "feedback": chosen.get(fb)}
+                for name, pct, fb in factors
+                if chosen.get(pct) is not None
+            ],
+        }
+
+    def fitness_age(self, day: date) -> dict[str, Any]:
+        raw = self._login().get_fitnessage_data(day.isoformat()) or {}
+        comps = raw.get("components") or {}
+        return {
+            "date": day.isoformat(),
+            "chronological": raw.get("chronologicalAge"),
+            "fitness": raw.get("fitnessAge"),
+            "achievable": raw.get("achievableFitnessAge"),
+            "updated": raw.get("lastUpdated"),
+            "components": [
+                {
+                    "name": name,
+                    "value": (c or {}).get("value"),
+                    "target_value": (c or {}).get("targetValue"),
+                    "improvement_value": (c or {}).get("improvementValue"),
+                    "potential_age": (c or {}).get("potentialAge"),
+                    # 1 is the component holding the fitness age back hardest.
+                    "priority": (c or {}).get("priority"),
+                }
+                for name, c in sorted(comps.items())
+            ],
+        }
+
+    def race_predictions(self) -> dict[str, Any]:
+        raw = self._login().get_race_predictions() or {}
+        return {
+            "date": raw.get("calendarDate"),
+            "time_5k_s": raw.get("time5K"),
+            "time_10k_s": raw.get("time10K"),
+            "time_half_s": raw.get("timeHalfMarathon"),
+            "time_marathon_s": raw.get("timeMarathon"),
+        }
+
+    def weight_history(self, start: date, end: date) -> list[dict[str, Any]]:
+        raw = self._login().get_body_composition(start.isoformat(), end.isoformat()) or {}
+        out: dict[str, float] = {}
+        for entry in raw.get("dateWeightList") or []:
+            day = entry.get("calendarDate")
+            grams = entry.get("weight")
+            if not day or not grams:
+                continue
+            # Several weigh-ins on one day happen; keep the first (the morning one).
+            out.setdefault(day, round(float(grams) / 1000.0, 1))
+        return [{"day": d, "weight_kg": kg} for d, kg in sorted(out.items())]
+
     # ---------- WRITE ----------
     def create_running_workout(
         self, spec: dict[str, Any], _build_only: bool = False

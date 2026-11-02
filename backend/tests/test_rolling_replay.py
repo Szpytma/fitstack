@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from conftest import history
+from conftest import history, week_of
 from test_block_shape import GOAL_S, START, marathon_plan
 
 from app import active_plan
@@ -146,3 +146,86 @@ def test_status_reports_the_pins_it_replays_from():
     assert status["block_weeks"] == len(
         active_plan.rebuild(state, history(START, weeks=12, weekly_km=40))["weeks"]
     )
+
+
+def test_compliance_reports_a_base_week_in_minutes_not_kilometres():
+    """The card on `/plan` has to agree with the engine that judges the week.
+
+    `adapt.decide` measures a base block in minutes, because at a fixed heart
+    rate distance is an outcome. `compliance` once measured the same week in
+    kilometres on its own, so a week run slower than planned — exactly what a
+    hot day or a tired leg produces — showed as *over* target on screen while
+    the engine saw a shortfall. Same week, two numbers, and the one the athlete
+    could see was the wrong one.
+    """
+    week = {
+        "index": 1,
+        "start": "2026-09-28",
+        "end": "2026-10-04",
+        "planned_km": 24.6,
+        "planned_minutes": 240,
+        "sessions": [{}, {}, {}, {}],
+    }
+    plan = {"weeks": [week, {"index": 2, "start": "2026-10-05", "end": "2026-10-11"}]}
+    # Four runs that hit 240 minutes exactly while falling well short on
+    # distance — the signature of honest zone 2 running on a bad day.
+    slow = [
+        {
+            "type": "running",
+            "start_local": f"2026-09-{day} 07:00",
+            "distance_m": 5000,
+            "duration_s": 60 * 60,
+            "avg_hr": 140,
+            "avg_speed_mps": 5000 / 3600,
+        }
+        for day in ("28", "29", "30")
+    ] + [
+        {
+            "type": "running",
+            "start_local": "2026-10-01 07:00",
+            "distance_m": 5000,
+            "duration_s": 60 * 60,
+            "avg_hr": 140,
+            "avg_speed_mps": 5000 / 3600,
+        }
+    ]
+
+    got = active_plan.compliance(
+        plan, week_number=2, activities=slow, today=date(2026, 10, 5), max_hr=200
+    )
+
+    assert got is not None
+    assert got["unit"] == "min"
+    assert got["planned_minutes"] == 240
+    assert got["actual_minutes"] == 240
+    assert got["ratio"] == 1.0  # on target, in the unit that was prescribed
+    # In kilometres the same week reads as a 19% shortfall. That is the figure
+    # the card used to show, and it would have had the athlete chasing pace.
+    assert got["actual_km"] == 20.0
+    assert round(got["actual_km"] / got["planned_km"], 2) == 0.81
+    assert got["runs_done"] == 4
+    assert got["runs_planned"] == 4
+
+
+def test_compliance_still_reports_a_race_week_in_kilometres():
+    """A race block prescribes distance, so nothing changes there."""
+    week = {
+        "index": 1,
+        "start": "2026-09-28",
+        "end": "2026-10-04",
+        "planned_km": 40.0,
+        "sessions": [{}, {}],
+    }
+    plan = {"weeks": [week, {"index": 2, "start": "2026-10-05", "end": "2026-10-11"}]}
+    got = active_plan.compliance(
+        plan,
+        week_number=2,
+        activities=week_of(date(2026, 9, 28), 32.0, runs=2),
+        today=date(2026, 10, 5),
+        max_hr=200,
+    )
+
+    assert got is not None
+    assert got["unit"] == "km"
+    assert got["planned_minutes"] is None
+    assert got["ratio"] == 0.8

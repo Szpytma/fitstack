@@ -238,6 +238,15 @@ week in place keeps the taper where it belongs.
 `last_week` reports the raw numbers alongside the decision, so a week that fell short
 without triggering a rule still says so.
 
+**Compliance is judged in the unit the plan prescribes**, and there is exactly one
+place that decides which: `adapt.report_week`. `active_plan.compliance` delegates to
+it rather than counting kilometres itself, which is what it used to do — so a base
+week run slower than planned showed as *over* target on the `/plan` card while the
+engine saw a shortfall. At a fixed heart rate distance is an outcome, so the two
+units disagree by design, and the athlete was being shown the one the engine
+ignores. `PlanCompliance.unit` carries the answer to the UI; read `ratio` against
+it, never against `actual_km`.
+
 `build_plan` needed no changes for any of this — it already anchors weeks *backwards*
 from the race date, so replaying it with the original `start_date` reproduces the
 same calendar weeks with the same phases.
@@ -248,6 +257,81 @@ watch chases changes, so pace-mode and HR-mode plans have identical volume. Band
 come from `provider.heart_rate_zones()` (the athlete's configured Garmin max HR and
 zone floors); if Garmin has no zone setup it falls back to the median of the three
 highest run HRs, and says so in `warnings`.
+
+## Training metrics (`/stats`)
+
+Garmin's own read of where the athlete is: VO2max, training status and load
+balance, HRV, training readiness, fitness age, race predictions, weigh-ins.
+None of it is reproducible from activity history — the watch computes these from
+data the API never exposes per sample — so they are read, not derived.
+
+Six provider methods rather than one fat call, so a provider can serve the ones
+it has; each defaults to `NotImplementedError` like `create_strength_workout`,
+which keeps the Strava slot warm without stub methods.
+
+- **`GET /stats/overview` tolerates partial failure on purpose.** It stitches
+  six independent upstream endpoints together, and any of them can be missing
+  for an account (no HRV-capable watch, no fitness age before enough data
+  accumulates) or simply down. Each block is nullable, `warnings` names what did
+  not arrive, and only an empty result 502s. Don't "simplify" this into one
+  try/except around the lot — one dead endpoint would blank the page.
+- **`GET /stats/weeks` applies the adaptation scales.** Planned minutes come
+  from replaying the block *and then* `adapt.scales_through`, because that is
+  what the athlete was actually given; `/plan/week` serves the adapted figure,
+  so quoting the unadjusted one here would disagree with the calendar and the
+  watch. Two passes, same as `active_plan.adapted_view`, and for the same
+  reason — see "Never re-level against an already-adjusted block".
+- **Read height, never derive it.** `get_user_profile()["userData"]["height"]`
+  is centimetres. Body-mass targets are meaningless without it, and working it
+  back out of a reported BMI is circular (that BMI came from the height) and
+  breaks silently when Garmin changes its rounding. BMI 30 is the only
+  body-mass reference line on the chart with a clinical meaning; Garmin's own
+  fitness-age model targets BMI 21, which is not a realistic goal for most
+  people and belongs in the component table, not as a line.
+
+### Garmin's shapes, the hard way
+
+- **Readiness is a list, and the score collapses after a session.** Garmin
+  rewrites it several times a day. One hard run took this account from 70 to 22
+  with a 46-hour recovery time — that reading says the run was hard, not that
+  the athlete is unready. Take the `AFTER_WAKEUP_RESET` entry. The midnight
+  reading is no good either: it lands before sleep is scored, so `validSleep`
+  is false and there is no sleep score at all. The provider still returns the
+  day's last reading as `latest_score`/`latest_recovery_time_min`, which is the
+  honest way to show "today's session cost this much".
+- **Acute and chronic load are nested.** `acwrStatus`,
+  `dailyTrainingLoadAcute`, `dailyTrainingLoadChronic` and
+  `dailyAcuteChronicWorkloadRatio` live under `acuteTrainingLoadDTO`, not on the
+  training-status entry. Reading them off the entry gives null and looks like an
+  account without the metric.
+- **Several metrics are keyed by device.** `latestTrainingStatusData` and
+  `metricsTrainingLoadBalanceDTOMap` are maps of `deviceId` to entry. An account
+  with two watches gets two entries; take the freshest `calendarDate`, because
+  `primaryTrainingDevice` is not always set.
+- **`trainingStatus` is an opaque integer.** The meaning is in
+  `trainingStatusFeedbackPhrase` (`RECOVERY_2`, `STRAINED_3`), so both travel
+  together and neither is interpreted in the backend.
+- **`vo2MaxValue` is rounded, `vo2MaxPreciseValue` is what the watch shows.**
+- **Weigh-ins are manual and sparse, and a day can hold several.**
+  `get_body_composition` returns grams. Keep the first entry per day (the
+  morning one) and expect long gaps — this is not a continuous series, so a
+  chart must not interpolate it into one.
+
+### `adapt.week_series` vs `adapt.report_week`
+
+`report_week` answers "how did plan week 5 go". `week_series` answers "what has
+the training looked like" — calendar weeks, spanning the time before the block
+opened, with no opinion about what was planned.
+
+- **Weeks with no runs are absent, not zero.** A gap in training is not a week
+  of zero volume; drawing it as one implies a measurement nobody took, and a
+  reader cannot tell "ran nothing" from "no data".
+- **EF is not comparable across training eras,** which is why `since` exists.
+  It rises with intensity *inside* the aerobic window, so short efforts near the
+  top of the band out-score genuinely easy running: this account reads 0.95-1.0
+  for 2025's 5K efforts and 0.78-0.86 through the base block, and the earlier
+  figure is not the better fitness. The UI starts the chart at the current era
+  and says so on the card.
 
 ## Tests
 
@@ -408,3 +492,10 @@ the week.
 
 Still unexercised against live Garmin: the actual write. "Schedule this week" is the
 much safer first test of `/plan/apply` — four sessions instead of fifty.
+
+**Stats page (2026-10-26)** — `/stats` in the UI over `GET /stats/{overview,weight,weeks}`,
+verified against the live account: all six upstream reads returned, `warnings` empty,
+and the planned-minutes figure agrees with `/plan/week` by construction. Sidebar and
+bottom nav gain a "Stats" entry. The recovery charts reuse `/health/summary-history`
+and `/health/sleep-history` rather than adding endpoints. `adapt.week_series` is the
+new pure function behind the week chart, covered by `tests/test_week_series.py`.

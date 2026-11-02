@@ -62,6 +62,11 @@ function Stat({ label, value }: { label: string; value: string }) {
  *  that fell short but did not trigger a rule still says so plainly.
  */
 function LastWeek({ c }: { c: PlanCompliance }) {
+  // A base block prescribes minutes, a race block kilometres, and `ratio` is
+  // already in the plan's own unit — the same one `adapt.decide` judges by.
+  // Showing km for a base week made the card disagree with the engine: at a
+  // fixed heart rate a slow week hits its minutes while covering less ground.
+  const minutes = c.unit === "min" && c.planned_minutes != null;
   const pct = c.ratio == null ? null : Math.round(c.ratio * 100);
   const short = pct != null && pct < 70;
   const over = pct != null && pct > 130;
@@ -80,8 +85,23 @@ function LastWeek({ c }: { c: PlanCompliance }) {
       )}
       <div>
         <span className="font-medium">Week {c.week_number}:</span> you ran{" "}
-        {c.actual_km} km of {c.planned_km} planned
+        {minutes
+          ? `${c.actual_minutes} min of ${c.planned_minutes} planned`
+          : `${c.actual_km} km of ${c.planned_km} planned`}
         {pct != null && ` (${pct}%)`}, {c.runs_done} of {c.runs_planned} runs.
+        {minutes && (
+          <>
+            {" "}
+            <span className="text-slate-500">
+              {c.actual_km} km at the heart rate that produced it
+              {c.ef_median != null && `, EF ${c.ef_median.toFixed(3)}`}
+              {c.ef_median != null &&
+                c.ef_samples != null &&
+                ` from ${c.ef_samples} run${c.ef_samples === 1 ? "" : "s"}`}
+              .
+            </span>
+          </>
+        )}
         {short && (
           <>
             {" "}

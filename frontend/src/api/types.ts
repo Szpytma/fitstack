@@ -306,9 +306,17 @@ export interface PlanCompliance {
   end: string;
   planned_km: number;
   actual_km: number;
+  planned_minutes?: number | null;
+  actual_minutes?: number | null;
+  /** The unit `ratio` is in: "min" for a base block, "km" for a race one.
+   *  Read `ratio` against this, never against `actual_km` — at a fixed heart
+   *  rate a slow week hits its minutes while covering less ground. */
+  unit: "min" | "km";
   ratio?: number | null;
   runs_done: number;
   runs_planned: number;
+  ef_median?: number | null;
+  ef_samples?: number;
 }
 
 /** Why the upcoming week advances, holds, or steps back. Deterministic — the
@@ -423,4 +431,137 @@ export interface StrengthApplyResult {
   removed: number;
   failures: string[];
   workout_ids: number[];
+}
+
+// ---------------------------------------------------------------------------
+// Training metrics (/stats) — Garmin's own read of where the athlete is.
+// ---------------------------------------------------------------------------
+
+export interface AthleteProfile {
+  height_cm: number | null;
+  weight_kg: number | null;
+  birth_date: string | null;
+  gender: string | null;
+}
+
+/** One of Garmin's three load buckets, with the range it wants it inside. */
+export interface LoadBucket {
+  bucket: string;
+  load: number | null;
+  target_min: number | null;
+  target_max: number | null;
+}
+
+export interface TrainingStatus {
+  date: string;
+  vo2max: number | null;
+  vo2max_measured: string | null;
+  status: number | null;
+  feedback: string | null;
+  acute_load: number | null;
+  chronic_load: number | null;
+  acwr: number | null;
+  acwr_status: string | null;
+  balance_feedback: string | null;
+  load_balance: LoadBucket[];
+}
+
+export interface Hrv {
+  date: string;
+  weekly_avg: number | null;
+  last_night: number | null;
+  status: string | null;
+  feedback: string | null;
+  baseline_low_upper: number | null;
+  baseline_balanced_low: number | null;
+  baseline_balanced_high: number | null;
+}
+
+export interface ReadinessFactor {
+  factor: string;
+  percent: number | null;
+  feedback: string | null;
+}
+
+export interface TrainingReadiness {
+  date: string;
+  score: number | null;
+  level: string | null;
+  feedback: string | null;
+  measured_at: string | null;
+  context: string | null;
+  sleep_score: number | null;
+  recovery_time_min: number | null;
+  acute_load: number | null;
+  /** The day's last reading — low right after a session, which is the point. */
+  latest_score: number | null;
+  latest_recovery_time_min: number | null;
+  factors: ReadinessFactor[];
+}
+
+export interface FitnessAgeComponent {
+  name: string;
+  value: number | null;
+  target_value: number | null;
+  improvement_value: number | null;
+  potential_age: number | null;
+  /** 1 is the component holding the fitness age back hardest. */
+  priority: number | null;
+}
+
+export interface FitnessAge {
+  date: string;
+  chronological: number | null;
+  fitness: number | null;
+  achievable: number | null;
+  updated: string | null;
+  components: FitnessAgeComponent[];
+}
+
+export interface RacePredictions {
+  date: string | null;
+  time_5k_s: number | null;
+  time_10k_s: number | null;
+  time_half_s: number | null;
+  time_marathon_s: number | null;
+}
+
+/** Each block is nullable: they come from separate Garmin endpoints, and one
+ *  being unavailable is named in `warnings` rather than failing the page. */
+export interface StatsOverview {
+  date: string;
+  profile: AthleteProfile | null;
+  training_status: TrainingStatus | null;
+  hrv: Hrv | null;
+  readiness: TrainingReadiness | null;
+  fitness_age: FitnessAge | null;
+  race_predictions: RacePredictions | null;
+  warnings: string[];
+}
+
+export interface WeightPoint {
+  day: string;
+  weight_kg: number;
+  bmi: number | null;
+}
+
+export interface WeightHistory {
+  height_cm: number | null;
+  /** Mass at BMI 30 for this athlete — the obesity threshold. */
+  bmi30_kg: number | null;
+  points: WeightPoint[];
+}
+
+/** `ef_median` is null when no run that week fell inside the aerobic window.
+ *  That is a real answer, not a gap — see `adapt.py`. */
+export interface StatsWeek {
+  week_start: string;
+  week_end: string;
+  week_no: number | null;
+  planned_minutes: number | null;
+  actual_minutes: number;
+  km: number;
+  runs: number;
+  ef_median: number | null;
+  ef_runs: number;
 }
