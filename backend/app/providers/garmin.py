@@ -19,17 +19,20 @@ from app.providers.base import FitnessProvider
 #: on the page, and the cost of guessing Fahrenheit wrongly is the same.
 PLAUSIBLE_MAX_CELSIUS = 45.0
 
+#: Garmin reports wind in mph on an imperial account, km/h on a metric one.
+MILES_TO_KM = 1.609344
 
-def weather_temps_celsius(
-    weather: dict[str, Any],
-) -> tuple[float | None, float | None]:
-    """`(temp_c, apparent_c)` with the account's unit inferred once per reading.
 
-    Garmin reports temperature in whatever unit the account is set to and names
-    no unit anywhere in the payload, so it has to be inferred. The inference has
-    to be made **once for the whole reading**, never per field: the unit is a
-    single account-level setting, so a reading is wholly Fahrenheit or wholly
-    Celsius.
+def normalize_weather(weather: dict[str, Any]) -> dict[str, Any]:
+    """One reading in metric, with the account's unit inferred once.
+
+    Garmin reports weather in whatever unit system the account is set to and
+    names no unit anywhere in the payload, so it has to be inferred. The
+    inference has to be made **once for the whole reading**, never per field:
+    the unit is a single account-level setting, so a reading is wholly imperial
+    or wholly metric. Temperature and wind are normalised together off that one
+    decision, which is why they share a function rather than each having their
+    own — two decisions are two chances to disagree.
 
     Deciding per value splits one reading across both scales as soon as one
     field crosses the threshold and another does not, which is how this was
@@ -49,25 +52,44 @@ def weather_temps_celsius(
       below it (38 C air, ~50 C apparent). Letting it vote would convert the
       whole reading and turn that 38 C into 3 C.
 
+    **`windSpeed` rides on the same decision and cannot vote on it.** Garmin
+    reports it in mph on a Fahrenheit account and km/h on a Celsius one, and it
+    was previously mapped straight to `wind_kph` — so an imperial account's
+    figure was mph under a metric label, reading 38% low. Wind speed carries no
+    usable evidence of its own: 6 and 20 are ordinary readings in either unit,
+    so there is no threshold to test. It has to follow the temperature.
+
     Residual limit: a genuinely cold Fahrenheit reading whose `temp` sits below
-    the threshold is indistinguishable from Celsius and stays unconverted. Only
-    the account's own unit setting could settle that, and it is not in this
-    payload.
+    the threshold is indistinguishable from Celsius, and the whole reading —
+    wind included — stays unconverted. Only the account's own unit setting could
+    settle that, and it is not in this payload.
     """
     # `temp` alone, because it is the only field that is unambiguously the air
     # temperature; apparent temperature is a heat index and can exceed the
-    # threshold in Celsius. See the docstring for why dew point is not read.
+    # threshold in Celsius. See the docstring for why dew point and wind are
+    # not read.
     deciding = weather.get("temp")
     if deciding is None:
         deciding = weather.get("apparentTemp")
-    fahrenheit = deciding is not None and float(deciding) > PLAUSIBLE_MAX_CELSIUS
+    imperial = deciding is not None and float(deciding) > PLAUSIBLE_MAX_CELSIUS
 
     def to_c(v: float | None) -> float | None:
         if v is None:
             return None
-        return (float(v) - 32) * 5 / 9 if fahrenheit else float(v)
+        return (float(v) - 32) * 5 / 9 if imperial else float(v)
 
-    return to_c(weather.get("temp")), to_c(weather.get("apparentTemp"))
+    wind = weather.get("windSpeed")
+    return {
+        "temp_c": to_c(weather.get("temp")),
+        "apparent_c": to_c(weather.get("apparentTemp")),
+        "humidity": weather.get("relativeHumidity"),
+        "wind_kph": (
+            round(float(wind) * MILES_TO_KM, 1)
+            if wind is not None and imperial
+            else wind
+        ),
+        "conditions": (weather.get("weatherTypeDTO") or {}).get("desc"),
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -319,16 +341,7 @@ class GarminProvider(FitnessProvider):
                 "low_bpm": z.get("zoneLowBoundary"),
             })
 
-        weather_out: dict[str, Any] = {}
-        if weather:
-            temp_c, apparent_c = weather_temps_celsius(weather)
-            weather_out = {
-                "temp_c": temp_c,
-                "apparent_c": apparent_c,
-                "humidity": weather.get("relativeHumidity"),
-                "wind_kph": weather.get("windSpeed"),
-                "conditions": (weather.get("weatherTypeDTO") or {}).get("desc"),
-            }
+        weather_out = normalize_weather(weather) if weather else {}
 
         return {
             "activity_id": int(aid),
